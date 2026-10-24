@@ -164,51 +164,6 @@ test('restart clears effects and bonus metadata', () => {
   assert.equal(game.pendingReward, 0);
   assert.equal(game.timeScale, 1);
 });
-test('only new words of at least five letters get a chance to drop an hourglass', () => {
-  let rolls = 0;
-  const game = create({}, () => { rolls++; return 0; });
-  for (const word of ['CAT','CATS']) {
-    spell(game, word, 1000);
-    assert.equal(game.submit(1000).hourglassOffered, false);
-  }
-  assert.equal(rolls, 0);
-  assert.equal(game.collectHourglass(1000).type, 'ignored');
-  spell(game, 'CATCH', 1000);
-  assert.equal(game.hourglassOffer, false);
-  assert.equal(game.submit(1000).hourglassOffered, true);
-  assert.equal(rolls, 1);
-  assert.equal(game.effects.hourglass, 0);
-  assert.equal(game.collectHourglass(2000).type, 'effect');
-  assert.equal(game.hourglassOffer, false);
-  assert.equal(game.effects.hourglass, 5);
-  assert.equal(game.collectHourglass(2000).type, 'ignored');
-  spell(game, 'CATCH', 2000);
-  assert.equal(game.submit(2000).reason, 'repeat');
-  spell(game, 'CATQ', 2000);
-  assert.equal(game.hourglassOffer, false);
-  assert.equal(rolls, 1);
-});
-test('hourglass chance can succeed or miss and obeys configured frequency and minimum length', () => {
-  for (const [options, roll, offered] of [[{}, .2, true],[{}, .7, false],[{spawnChance:0},0,false],[{spawnChance:1},.999,true],[{enabled:false},0,false],[{minWordLength:6},0,false]]) {
-    const game = create({hourglass:options}, () => roll);
-    spell(game, 'CATCH');
-    assert.equal(game.submit(0).hourglassOffered, offered);
-    assert.equal(game.hourglassOffer, offered);
-  }
-});
-test('falling hourglasses pause with the game, disappear when missed and clear on restart', () => {
-  const game = create(); spell(game, 'CATCH'); game.submit(0);
-  game.pause(3000); game.advance(100000);
-  assert.equal(game.hourglassOffer, true);
-  assert.equal(game.collectHourglass(100000).type, 'ignored');
-  game.resume(100000);
-  game.discardHourglass();
-  assert.equal(game.collectHourglass(100000).type, 'ignored');
-  spell(game, 'SMILE', 100000); game.submit(100000);
-  assert.equal(game.hourglassOffer, true);
-  game.start(200000);
-  assert.equal(game.hourglassOffer, false);
-});
 test('hourglasses enter above the top at a random horizontal position away from other tiles', () => {
   const first = hourglassPosition(390, 47, [], () => 0);
   const second = hourglassPosition(390, 47, [], () => 1);
@@ -322,18 +277,4 @@ test('anchored smoke freezes during pause and still dissolves on active time wit
   game.resume(100000);game.advance(102400);
   near(game.effects.smoke,.6);near(pose().opacity,.5);
   game.advance(103000);near(game.effects.smoke,0);near(pose().opacity,0);
-});
-
-
-test('special tiles stay out of the opening and unlock only after active warm-up time',()=>{
-  const game=create({specialTiles:{warmupSeconds:10},hourglass:{spawnChance:1}});
-  for(let i=0;i<20;i++)assert.deepEqual(game.rollTileTraits(()=>0),{bonus:true,grenade:false});
-  spell(game,'CATCH',9999);assert.equal(game.submit(9999).hourglassOffered,false);
-  assert.equal(game.specialTilesUnlocked,false);
-  game.pause(9999);game.advance(999999);assert.equal(game.specialTilesUnlocked,false);
-  game.resume(999999);game.advance(1000000);
-  assert.equal(game.specialTilesUnlocked,true);assert.equal(game.rollTileTraits(()=>0).grenade,false);
-  spell(game,'SMILE',1000000);assert.equal(game.submit(1000000).hourglassOffered,true);
-  game.start(2000000);assert.equal(game.specialTilesUnlocked,false);assert.equal(game.rollTileTraits(()=>0).grenade,false);
-  assert.throws(()=>createConfig({specialTiles:{warmupSeconds:-1}}),/warmupSeconds/);
 });

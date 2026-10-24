@@ -1,7 +1,7 @@
 /* Edit these values, save, then refresh the game. All times are in seconds.
  * Rotation limits are speed magnitudes in degrees/second; direction is chosen
  * separately for each tile. Set both letter rotation limits to 0 to stop their spinning;
- * two-sided pickups use hourglass.rotationDegreesPerSecond.
+ * Colored-letter effect rates live in letterEffects; hourglass controls slow time.
  */
 (function (root, factory) {
   const api = factory();
@@ -55,11 +55,17 @@
     "enabled": true,
     "minWordLength": 5,
     "spawnChance": 0.3333333333333333,
+    "minWordsBetweenDrops": 3,
+    "maxWordsBetweenDrops": 5,
     "speedMultiplier": 1.8,
     "rotationDegreesPerSecond": 56,
     "durationSeconds": 5,
     "timeScale": 0.4,
     "color": "#bce2d6"
+  },
+  "letterEffects": {
+    "purpleChance": 0.15,
+    "blueChance": 0.03
   },
   "smoke": {
     "durationSeconds": 5,
@@ -136,8 +142,9 @@
     "nextLetterDecay": 0.4
   },
   "rotation": {
-    "minDegreesPerSecond": 8,
-    "maxDegreesPerSecond": 32,
+    "minDegreesPerSecond": 12,
+    "maxDegreesPerSecond": 40,
+    "faceTurnRatio": 0.25,
     "randomDirection": true,
     "maxInitialAngleDegrees": 6,
     "respectReducedMotion": true,
@@ -237,10 +244,16 @@
     if (config.opening.maxHeightFraction > 1) throw new Error('config.js: opening.maxHeightFraction must be at most 1.');
     number('bonusLetters', 'chance');
     number('bonusLetters', 'timeMultiplier', 1);
+    for (const key of ['purpleChance','blueChance']) number('letterEffects',key);
+    if (config.letterEffects.purpleChance+config.letterEffects.blueChance>1) throw new Error('config.js: letterEffects chances must total at most 1.');
     number('specialTiles', 'warmupSeconds');
     if (!Number.isInteger(config.hourglass.minWordLength) || config.hourglass.minWordLength < 1) throw new Error('config.js: hourglass.minWordLength must be a positive integer.');
     number('hourglass', 'spawnChance');
     if (config.hourglass.spawnChance > 1) throw new Error('config.js: hourglass.spawnChance must be between 0 and 1.');
+    for (const key of ['minWordsBetweenDrops','maxWordsBetweenDrops']) {
+      if (!Number.isInteger(config.hourglass[key]) || config.hourglass[key] < 1) throw new Error(`config.js: hourglass.${key} must be a positive integer.`);
+    }
+    if (config.hourglass.maxWordsBetweenDrops < config.hourglass.minWordsBetweenDrops) throw new Error('config.js: hourglass drop interval bounds are reversed.');
     number('hourglass', 'speedMultiplier', 1, true);
     number('hourglass', 'durationSeconds', 0, true);
     number('hourglass', 'timeScale', 0, true);
@@ -281,6 +294,8 @@
       number('wordAssist', key);
       if (config.wordAssist[key] > 1) throw new Error(`config.js: wordAssist.${key} must be between 0 and 1.`);
     }
+    number('rotation', 'faceTurnRatio', 0, true);
+    if (config.rotation.faceTurnRatio > 1) throw new Error('config.js: rotation.faceTurnRatio must be at most 1.');
     for (const key of ['minDegreesPerSecond', 'maxDegreesPerSecond', 'maxInitialAngleDegrees']) number('rotation', key);
     for (const key of ['highValueMinPoints', 'rockDegrees', 'restMinSeconds', 'restMaxSeconds', 'secondaryAxisWeight']) number('rotation', key);
     if (config.rotation.secondaryAxisWeight > 1) throw new Error('config.js: rotation.secondaryAxisWeight must be between 0 and 1.');

@@ -4,8 +4,6 @@ import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
 import { celMaterial, atmosphereMaterial, smokeMaterial } from './materials.js';
 import { createUI } from './ui.js';
-import { createPickupFaces } from './icons.js';
-import { pickupEffectFromYaw } from './pickup-facing.mjs';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout } from './layout.mjs';
 
@@ -42,7 +40,7 @@ export async function createScene(host, config, reducedMotion) {
   const skyMaterial = atmosphereMaterial();
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(360, 640), skyMaterial);
   sky.position.z = -25; background.add(sky);
-  const materials = Object.fromEntries(['cream','plum','gold','mint'].map(key => [key, celMaterial(DESIGN.palette[key], {
+  const materials = Object.fromEntries(['cream','plum','gold','mint','letterInk','purpleLetter','blueLetter'].map(key => [key, celMaterial(DESIGN.palette[key], {
     specularStrength:key==='plum'?0:DESIGN.tile.specularStrength,shininess:DESIGN.tile.shininess,
   })]));
   const geometry = roundedSquare(config.tiles.mobileSize);
@@ -58,7 +56,7 @@ export async function createScene(host, config, reducedMotion) {
     fragmentShader: 'varying vec2 vUv;void main(){float d=length((vUv-.5)*2.);gl_FragColor=vec4(.40,.25,.30,(1.-smoothstep(.12,1.,d))*.21);}',
   });
 
-  function textMesh(text, size, depth = DESIGN.tile.letterDepth) {
+  function textMesh(text, size, depth = DESIGN.tile.letterDepth, ink='plum') {
     const key = `${text}:${size}:${depth}`;
     if (!textCache.has(key)) {
       const geo = new TextGeometry(text, { font, size, depth, curveSegments: 4, bevelEnabled: true, bevelThickness: .35, bevelSize: .25, bevelSegments: 1 });
@@ -67,7 +65,7 @@ export async function createScene(host, config, reducedMotion) {
       geo.translate(-(box.max.x + box.min.x) / 2, -(box.max.y + box.min.y) / 2, 0);
       textCache.set(key, geo);
     }
-    return new THREE.Mesh(textCache.get(key), materials.plum);
+    return new THREE.Mesh(textCache.get(key), materials[ink]);
   }
   const face=tileLayout(config.tiles.mobileSize);
   const faceDepth=DESIGN.tile.depth/2+DESIGN.tile.bevel+.55;
@@ -79,21 +77,19 @@ export async function createScene(host, config, reducedMotion) {
   }
   function build(tile) {
     const group = new THREE.Group();
-    const body = new THREE.Mesh(geometry, materials[tile.kind === 'hourglass' ? 'mint' : tile.bonus ? 'gold' : 'cream']);
+    const body = new THREE.Mesh(geometry, materials[tile.bonus ? 'gold' : 'cream']);
     group.add(body);
     const front = new THREE.Group();
-    if (tile.kind === 'hourglass') {
-      group.add(createPickupFaces(materials.plum,materials.gold,faceDepth));
-    } else {
+    {
       // Separate typographic zones: badge row, letter, then point value.
       // Every glyph is fitted by its actual geometry, including wide W/M.
-      if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25),face.letter));
+      if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25,DESIGN.tile.letterDepth,tile.effect==='smoke'?'purpleLetter':tile.effect==='hourglass'?'blueLetter':'letterInk'),face.letter));
       front.add(placeFace(textMesh(String(tile.blank?0:config.letterPoints[tile.letter]),5.5,.65),face.points));
       if(tile.bonus)front.add(placeFace(textMesh(`x${config.bonusLetters.timeMultiplier}`,6,.8),face.bonus));
     }
     // Rotate a second face outward so its lettering reads normally from behind.
     // Cloning reuses the cached geometries and materials on both sides.
-    if(tile.kind!=='hourglass'){
+    {
       const back = front.clone();back.rotation.y = Math.PI;group.add(front, back);
     }
     group.userData.tile = tile;
@@ -146,8 +142,8 @@ export async function createScene(host, config, reducedMotion) {
       const model = bodies.get(tile) || build(tile);
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
       model.group.position.set(tile.x-layout.width/2,layout.height/2-tile.y+previewFloat,0);
-      // Logical Y points down, so negate the letter's screen-plane Z angle.
-      model.group.rotation.set(0,tile.kind==='hourglass'?(tile.yaw||0):0,tile.kind==='hourglass'?0:-(tile.tilt||0),'ZXY');
+      // Render the same Y-only pose used by collisions and pickup-face selection.
+      model.group.rotation.set(0,tile.yaw||0,0,'ZXY');
       // Hover lifts the tile, without growing its collision silhouette.
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
@@ -196,11 +192,6 @@ export async function createScene(host, config, reducedMotion) {
   }
   return {
     canvas, render, ui,
-    pickupEffect(tile) {
-      // Match the last displayed frame for both pointer and keyboard input.
-      const model=bodies.get(tile);
-      return model ? pickupEffectFromYaw(model.group.rotation.y) : null;
-    },
     get layout(){return layout;},
     setReducedMotion(value) {
       reducedMotion = Boolean(value);
@@ -219,7 +210,7 @@ export async function createScene(host, config, reducedMotion) {
       for (const hit of hits) { let obj = hit.object; while (obj && !obj.userData.tile) obj = obj.parent; if (obj) return { tile: obj.userData.tile }; }
       return null;
     },
-    burst(tile, { target = tile.kind === 'hourglass' ? 'timer' : 'tray', index = 0 } = {}) {
+    burst(tile, { target = 'tray', index = 0 } = {}) {
       const model = bodies.get(tile);
       if (!model) return;
       // The real tile is consumed immediately. This copy has no collision or

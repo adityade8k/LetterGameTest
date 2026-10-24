@@ -21,15 +21,15 @@ test('a valid word auto-submits once with its normal points and time',()=>{
   assert.equal(game.advance(7000),null);assert.equal(game.score,5);near(game.remaining,53.5);
 });
 
-test('automatic submissions preserve blank scoring, gold rewards, repeats, and hourglass drops',()=>{
-  const game=create({specialTiles:{warmupSeconds:0},hourglass:{spawnChance:1}});
+test('automatic submissions preserve blank scoring, gold rewards, repeats, without separate pickup drops',()=>{
+  const game=create({specialTiles:{warmupSeconds:0},hourglass:{minWordsBetweenDrops:2,maxWordsBetweenDrops:2}});
   game.select('C',0,{bonus:true});game.select('?',0);game.select('T',0);
   const first=game.advance(5000);
   assert.equal(first.word,'CAT');assert.equal(first.points,4);near(first.requestedReward,.7);
   spell(game,'CAT',5000);const repeat=game.advance(10000);
   assert.equal(repeat.reason,'repeat');assert.equal(repeat.penalty,2);assert.equal(game.comboCount,0);assert.equal(game.score,4);
   spell(game,'CATCH',10000);const longer=game.advance(15000);
-  assert.equal(longer.points,12);near(longer.requestedReward,14.4);assert.equal(longer.hourglassOffered,true);assert.equal(game.hourglassOffer,true);
+  assert.equal(longer.points,12);near(longer.requestedReward,14.4);assert.equal(longer.hourglassOffered,false);assert.equal(game.hourglassOffer,false);
   assert.equal(game.collectedPoints('CAT'),4);assert.equal(game.score,16);
 });
 

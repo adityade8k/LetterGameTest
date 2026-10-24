@@ -160,11 +160,11 @@ test('reduced motion and game-over/reset settle pending points without lingering
 });
 
 
-test('help explains the facing-side pickup and no longer teaches grenade letters',supported,async()=>{
+test('help explains purple smoke and blue slow-time letters',supported,async()=>{
   const {ui,game,view,sync}=await create();view.mode='help';sync();
   const description=ui.description(game,view);
-  assert.match(description,/hourglass face.*slow time.*smoke bomb face.*smoke/);
-  assert.match(description,/Letter tiles never release smoke/);
+  assert.match(description,/Purple letters \(15 percent\).*smoke.*Blue letters \(3 percent\).*slow time/);
+  assert.match(description,/Separate hourglass and bomb tiles no longer drop/);
   assert.doesNotMatch(description,/Grenade letters release/);
 });
 
@@ -173,5 +173,5 @@ test('help describes the opening difficulty ramp and respects a disabled curve',
   const normal=await create();normal.view.mode='help';normal.sync();
   assert.match(normal.ui.description(normal.game,normal.view),/ramps up over 45 active seconds.*rises and falls randomly/);
   const easy=await create({difficulty:{enabled:false}});easy.view.mode='help';easy.sync();
-  assert.match(easy.ui.description(easy.game,easy.view),/Letter Z spin stays at zero/);
+  assert.match(easy.ui.description(easy.game,easy.view),/Letter Y spin stays at zero/);
 });

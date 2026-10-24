@@ -81,12 +81,11 @@ test('constant dense supply sustains more choices through a minute without tile 
   assert.ok(average>=17,`Only ${average.toFixed(1)} fully visible choices on average`);
 });
 
-test('specials keep their 20-second warm-up independently of the steady pace',()=>{
-  const game=new WordGame(['CATCH','SMILE'],{hourglass:{spawnChance:1}},()=>0);game.start(0);
-  for(const letter of 'CATCH')game.select(letter,19999);
-  assert.equal(game.submit(19999).hourglassOffered,false);assert.equal(game.rollTileTraits(()=>0).grenade,false);
-  game.advance(20000);assert.equal(game.rollTileTraits(()=>0).grenade,false);
-  for(const letter of 'SMILE')game.select(letter,20000);
-  assert.equal(game.submit(20000).hourglassOffered,true);
-  game.start(30000);assert.equal(game.rollTileTraits(()=>0).grenade,false);
+test('scored words never drop separate pickups',()=>{
+  const game=new WordGame(['CAT','DOG','SUN'],{},()=>0);game.start(0);
+  for(const [i,word] of ['CAT','DOG','SUN'].entries()){
+    for(const letter of word)game.select(letter,0);
+    assert.equal(game.submit(0).hourglassOffered,false);
+  }
+  assert.equal(game.elapsed,0);assert.equal(game.rollTileTraits(()=>0).grenade,false);
 });

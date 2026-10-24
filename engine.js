@@ -62,12 +62,11 @@
       this.comboCount++;
       this.comboSeconds = this.config.combo.maxGapSeconds;
     }
-    get specialTilesUnlocked() { return this.elapsed >= this.config.specialTiles.warmupSeconds; }
     rollTileTraits(random = Math.random) {
-      return {
-        bonus: random() < this.config.bonusLetters.chance,
-        grenade: false, // Retained for older renderers; letters never carry smoke bombs.
-      };
+      const bonus=random()<this.config.bonusLetters.chance,roll=random();
+      const {blueChance,purpleChance}=this.config.letterEffects;
+      const effect=roll<blueChance?'hourglass':roll<blueChance+purpleChance?'smoke':null;
+      return {bonus,grenade:false,effect};
     }
     pointsFor(word) { return [...word.toUpperCase()].reduce((sum, letter) => sum + (this.config.letterPoints[letter] || 0), 0); }
     collectedPoints(word) { return this.wordScores.get(word) ?? this.pointsFor(word); }
@@ -182,12 +181,17 @@
       }
       this.current += symbol;
       this.currentPrefixes=next;
-      this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:false });
+      const effect=!blank&&['hourglass','smoke'].includes(options.effect)?options.effect:null;
+      this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:false, effect });
       // Honor the window earned when this letter is selected, even if the
       // chain expires mid-countdown. The following pick uses the current boost.
       this.letterWindow = this.nextLetterWindow;
       this.letterSeconds = this.letterWindow;
       const result = next.length ? { type: 'letter', word: this.current } : this.penalize('spelling');
+      if(effect&&this.phase==='running'){
+        this.effects[effect]=this.config[effect].durationSeconds;
+        result.tileEffect={effect,duration:this.effects[effect]};
+      }
       return result;
     }
     submit(now) {
@@ -221,8 +225,7 @@
       this.letterSeconds = 0;
       const before = this.remaining;
       this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
-      const hourglassOffered = this.specialTilesUnlocked && this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
-      if (hourglassOffered) this.hourglassOffer = true;
+      const hourglassOffered = false; // Kept in accepted events for older renderers.
       return { type: 'word', automatic, comboCount: this.comboCount, letterWindow: this.nextLetterWindow, word, pattern, selectedTiles, blankCount, activeSeconds, wordIndex: this.words.length, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
     }
     penalize(reason) {

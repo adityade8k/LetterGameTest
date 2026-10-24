@@ -72,7 +72,7 @@ function finishRound(abandoned=false){
   refreshBook();
 }
 function makeTile(letter, x, y,fade=false) {
-  const blank=letter==='?',traits=blank?{bonus:false,grenade:false}:game.rollTileTraits();
+  const blank=letter==='?',traits=blank?{bonus:false,grenade:false,effect:null}:game.rollTileTraits();
   return prepareTile({ ...tileShape, kind:'letter', letter,blank,x,y,...traits,...(fade?{bornAt:game.elapsed}:{}),
     tilt:0 },config);
 }
@@ -128,14 +128,9 @@ function spawn() {
   if(position){tiles.push(makeTile(nextLetter(),position.x,position.y));refills.placed();return true;}
   return false;
 }
-function offerHourglass() {
-  tiles=tiles.filter(tile=>tile.kind!=='hourglass');
-  tiles.push(prepareTile({...tileShape,...LetterfallEffects.hourglassPosition(width,size,tiles),kind:'hourglass',tilt:0},config));
-}
 function handle(result){
   if(!result||result.type==='ignored')return;
   if(result.type==='word'){
-    if(result.hourglassOffered&&game.phase!=='over')offerHourglass();
     if(game.score>best){best=game.score;try{localStorage.setItem(storageKey,String(best));}catch{}}
     view.feedback='';view.feedbackKind='';feedbackUntil=0;
     const previousLongest=view.book.stats?.longestWord||'';
@@ -160,14 +155,12 @@ function pick(tile){
   if(game.phase!=='running'||view.mode)return;
   if(tile.bornAt!==undefined&&game.elapsed-tile.bornAt<config.falling.replacementFadeSeconds)return;
   view.focus='';
-  const effect=tile.kind==='hourglass'?scene.pickupEffect(tile):null;
-  if(tile.kind==='hourglass'&&!effect)return;
-  const result=tile.kind==='hourglass'?game.collectPickup(effect,performance.now()):game.select(tile.letter,performance.now(),tile);
+  const result=game.select(tile.letter,performance.now(),tile);
   if(result.consumed!==false&&['letter','penalty','effect'].includes(result.type)){
-    tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:tile.kind==='hourglass'?(effect==='smoke'?'smoke':'timer'):'tray',index:Math.max(0,game.current.length-1)});hover=null;
+    tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:'tray',index:Math.max(0,game.current.length-1)});hover=null;
     if(tile.kind==='letter'&&game.phase==='running')refills.picked();
   }
-  handle(result);refillChoices(true);updateLabel();
+  handle(result);if(result.tileEffect)handle({type:'effect',...result.tileEffect});refillChoices(true);updateLabel();
 }
 function sync(){
   view.best=best;view.roundBest=roundBest;view.soundOn=settings.effects;
@@ -183,10 +176,10 @@ function sync(){
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
-  const letters=visibleTiles().map(tile=>tile.kind==='hourglass'?`two-sided pickup (${scene.pickupEffect(tile)==='hourglass'?'hourglass facing':scene.pickupEffect(tile)==='smoke'?'smoke bomb facing':'edge-on'})`:tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.bonus?' (gold)':''}`).join(', ');
+  const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (purple, smoke)':tile.effect==='hourglass'?' (blue, slow time)':''}${tile.bonus?' (gold)':''}`).join(', ');
   const effects=`${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
-  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; 1 collects the facing side of a visible two-sided pickup; Escape pauses or resumes.`;
+  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; Escape pauses or resumes.`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
@@ -226,7 +219,7 @@ function home(){
   game.reset();roundId='';scene.reset();menuStack.length=0;resumeAfterMenu=false;
   Object.assign(view,{mode:'',focus:'',hover:'',feedback:'',feedbackKind:''});
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false}));
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false,effect:null}));
   sync();updateLabel();
 }
 function queryInput(key){
@@ -297,7 +290,6 @@ window.addEventListener('keydown',event=>{
   if(view.mode||game.phase!=='running')return;
   if(event.key==='Backspace'){event.preventDefault();act('undo');}
   else if(event.key==='?'||event.key==='*'){event.preventDefault();const tile=visibleTiles().find(t=>t.blank);if(tile)pick(tile);}
-  else if(event.key==='1'){event.preventDefault();const tile=visibleTiles().find(t=>t.kind==='hourglass');if(tile)pick(tile);}
   else if(/^[a-z]$/i.test(event.key)){
     event.preventDefault();const tile=visibleTiles().filter(t=>t.letter===event.key.toUpperCase()).sort((a,b)=>b.y-a.y)[0];
     if(tile)pick(tile);else feedback(`No ${event.key.toUpperCase()} in reach yet.`);
@@ -322,7 +314,7 @@ try{
   scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score and saved Wordbook are safe.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false}));
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false,effect:null}));
   sync();updateLabel();let previous=performance.now();
   function frame(now){
     const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));
@@ -332,8 +324,7 @@ try{
       const worldDt=dt*game.timeScale;
       densityRamp.advance(worldDt,game.wordCount);
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});
-      if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
-      tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
+      tiles=tiles.filter(tile=>tile.y<height+size);
       const spawnSeconds=currentSupply().spawnSeconds;
       if(arrivals.advance(worldDt,spawnSeconds)&&spawn())arrivals.placed();
     }

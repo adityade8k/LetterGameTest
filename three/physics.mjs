@@ -5,7 +5,7 @@ const randomRange = (min,max,random) => min+(max-min)*random();
 export function prepareTile(tile,config,random=Math.random){
   const rotation=config.rotation,high=(config.letterPoints[tile.letter]||0)>=rotation.highValueMinPoints;
   tile.vx=0;tile.vy=null;tile.age=0;
-  // Letters turn around Z; two-sided pickups turn around Y.
+  // All tiles turn around Y; letters linger face-on and cross the edge quickly.
   tile.pitch=0;tile.tilt=0;tile.pitchOffset=0;tile.yawOffset=0;tile.yaw=0;
   if(tile.kind==='hourglass'){
     tile.yaw=random()*Math.PI*2;
@@ -13,21 +13,26 @@ export function prepareTile(tile,config,random=Math.random){
   }else{
     // Independent phase as well as speed/direction prevents a new cohort from
     // turning together. Start within 60 degrees of upright for readability.
-    tile.tilt=randomRange(-Math.PI/3,Math.PI/3,random);
+    tile.spinPhase=(random()<.5?0:Math.PI)+randomRange(-Math.PI/3,Math.PI/3,random);
+    tile.yaw=letterYaw(tile.spinPhase,rotation.faceTurnRatio);
     const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
     tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
   }
   return tile;
 }
+// A uniform phase maps to slow face-on motion and a fast edge crossing.
+// atan2 keeps both faces continuous through complete turns in either direction.
+export function letterYaw(phase,ratio){return Math.atan2(ratio*Math.sin(phase),Math.cos(phase));}
 function rotate(tile,dt,config,reducedMotion,difficultyLevel){
   if(dt<=0)return;
   if(tile.kind!=='hourglass'&&reducedMotion&&config.rotation.respectReducedMotion)return;
   tile.age+=dt;
-  // Pickups always turn so either face can be chosen. Letters use the same
-  // difficulty curve on Z; zero holds their angle.
-  const intensity=tile.kind==='hourglass'?1:difficultyLevel;
-  const axis=tile.kind==='hourglass'?'yaw':'tilt';
-  tile[axis]=(tile[axis]+tile.rotationSpeed*intensity*dt)%(Math.PI*2);
+  if(tile.kind==='hourglass'){
+    tile.yaw=(tile.yaw+tile.rotationSpeed*dt)%(Math.PI*2);
+  }else{
+    tile.spinPhase=(tile.spinPhase+tile.rotationSpeed*difficultyLevel*dt)%(Math.PI*2);
+    tile.yaw=letterYaw(tile.spinPhase,config.rotation.faceTurnRatio);
+  }
 }
 // Bound the projected thickness as well as the face when tiles turn on X/Y.
 export function projectedHalfSize(tile,size,gap=0){
