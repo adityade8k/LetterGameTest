@@ -20,60 +20,93 @@ test('the same portrait world and controls fill the canvas at every display scal
   }
 });
 
-test('the first pick leaves a gap, including during periodic density maintenance',async()=>{
-  const {DeferredRefills}=await spawnModule,refills=new DeferredRefills(createConfig().falling);
-  refills.picked({x:150,y:250},0);
+test('the first pick holds its replacement until a later pick, including maintenance',async()=>{
+  const {DeferredRefills}=await spawnModule,refills=new DeferredRefills();
+  refills.picked();
   assert.equal(refills.budget(19,20,true),0);assert.equal(refills.budget(19,20),0);
-  assert.deepEqual(refills.blocked(10),[{x:150,y:250}]);
-  refills.picked({x:250,y:300},10);
-  assert.equal(refills.budget(18,20,true),1);
+  refills.picked();assert.equal(refills.budget(18,20,true),1);
   refills.placed();assert.equal(refills.budget(19,20),0);
-  assert.ok(refills.blocked(20).some(p=>p.x===250&&p.y===300));
-  assert.ok(!refills.blocked(20).some(p=>p.x===150&&p.y===250));
-  refills.reset();assert.equal(refills.budget(20,20),0);assert.deepEqual(refills.blocked(20),[]);
+  refills.reset();assert.equal(refills.budget(20,20),0);
 });
 
-test('later picks replenish safely without putting a tile under the latest tap',async()=>{
-  const {viewportLayout,letterTarget,exposedPosition}=await layoutModule,{fieldPosition,DeferredRefills}=await spawnModule,p=await physicsModule,c=createConfig(),size=c.tiles.mobileSize;
-  for(let seed=1;seed<=12;seed++){
-    const layout=viewportLayout(360,640),random=rng(seed),tiles=[],refills=new DeferredRefills(c.falling);
+test('replacements after repeated picks enter above the screen and fall into the board',async()=>{
+  const {viewportLayout,letterTarget}=await layoutModule,{fieldPosition,spawnPosition,DeferredRefills}=await spawnModule,p=await physicsModule,c=createConfig(),size=c.tiles.mobileSize;
+  for(let seed=1;seed<=6;seed++){
+    const layout=viewportLayout(360,640),random=rng(seed),tiles=[],refills=new DeferredRefills();
     const make=pos=>p.prepareTile({...pos,kind:'letter',letter:'A',tilt:0,pitchOffset:.18,yawOffset:-.22,halfDepth:13.1},c,random);
     for(let i=0;i<letterTarget(layout,c);i++){
       const pos=fieldPosition(tiles,layout,size,random);if(!pos)break;tiles.push(make(pos));
     }
     p.settleTiles(tiles,layout.width,size,c.physics);
-    const count=tiles.length;assert.ok(count>=16,`Only ${count} opening choices`);
+    let replacements=0;
     for(let i=0;i<10;i++){
-      const selected=tiles.splice(Math.floor(random()*tiles.length),1)[0];
-      refills.picked(selected,i);
-      const budget=refills.budget(tiles.length,count,true);assert.equal(budget,i?1:0);
+      tiles.shift();refills.picked();
+      const budget=refills.budget(tiles.length,20,true);assert.equal(budget,i?1:0);
       if(budget){
-        const replacement=fieldPosition(tiles,layout,size,random,refills.blocked(i),refills.gaps);
-        assert.ok(replacement,`Missing replacement on pick ${i+1}, seed ${seed}`);
-        assert.ok(Math.hypot(replacement.x-selected.x,replacement.y-selected.y)>=size*1.4);
-        assert.ok(exposedPosition(replacement.x,replacement.y,layout,size/2));
-        tiles.push(make(replacement));refills.placed();p.settleTiles(tiles,layout.width,size,c.physics);
+        const position=spawnPosition(tiles,layout.width,size,c,random);
+        if(position){
+          assert.ok(position.y+size/Math.SQRT2<0,'A new tile must start entirely above the canvas');
+          tiles.push(make(position));refills.placed();replacements++;
+        }
       }
-      assert.equal(tiles.length,count-1);
+      p.stepTiles(tiles,1.5,{width:layout.width,size,speed:c.falling.pixelsPerSecond,config:c,random});
       for(let a=0;a<tiles.length;a++)for(let b=a+1;b<tiles.length;b++)assert.ok((p.contact(tiles[a],tiles[b],size)?.penetration||0)<.05);
     }
+    assert.ok(replacements>0);
   }
 });
 
-test('open gaps inside recent tap areas are excluded even when a random draw lands there',async()=>{
-  const {viewportLayout}=await layoutModule,{fieldPosition}=await spawnModule,layout=viewportLayout(390,844);
-  const vacated={x:180,y:300};
-  const position=fieldPosition([{x:80,y:300}],layout,47,()=>.5,[vacated]);
-  assert.ok(position);assert.ok(Math.hypot(position.x-vacated.x,position.y-vacated.y)>=47*1.4);
+test('only the opening board uses scattered positions within the play area',async()=>{
+  const {viewportLayout,exposedPosition}=await layoutModule,{fieldPosition}=await spawnModule,layout=viewportLayout(360,640),random=rng();
+  const tiles=[];
+  for(let i=0;i<20;i++){
+    const position=fieldPosition(tiles,layout,47,random);if(!position)break;
+    assert.ok(exposedPosition(position.x,position.y,layout,47/2));tiles.push(position);
+  }
+  assert.ok(tiles.length>=16);
+  assert.ok(new Set(tiles.map(p=>Math.floor(p.y/50))).size>=4);
 });
 
-test('rapid taps retain a short cooldown and blocked replacements can be retried later',async()=>{
-  const {DeferredRefills}=await spawnModule,c=createConfig(),refills=new DeferredRefills(c.falling);
-  refills.picked({x:150,y:250},0);refills.picked({x:250,y:350},.1);
-  assert.equal(new Set(refills.blocked(.1).map(p=>p.x)).size,2);
-  assert.equal(refills.budget(18,20),1); // A failed placement keeps its credit.
+test('a blocked top entry keeps its replacement queued and never falls back to a middle gap',async()=>{
+  const {DeferredRefills,spawnPosition}=await spawnModule,c=createConfig(),refills=new DeferredRefills(),size=c.tiles.mobileSize;
+  const count=Math.floor(360/(size+c.tiles.gapPixels));
+  const blockers=Array.from({length:count},(_,i)=>({kind:'letter',x:(i+.5)*360/count,y:-size}));
+  refills.picked();refills.picked();
+  assert.equal(spawnPosition(blockers,360,size,c),null);
   assert.equal(refills.budget(18,20),1);
-  assert.deepEqual(refills.blocked(1),[{x:250,y:350}]);
-  refills.placed();assert.equal(refills.budget(19,20),0);
-  assert.throws(()=>createConfig({falling:{replacementCooldownSeconds:-1}}),/replacementCooldownSeconds/);
+  blockers.forEach(tile=>tile.y+=size*2);
+  const position=spawnPosition(blockers,360,size,c,()=>.5);
+  assert.ok(position&&position.y<0);refills.placed();assert.equal(refills.budget(19,20),0);
+  const full=Array.from({length:c.falling.letterLimit},()=>({kind:'letter',x:180,y:300}));
+  assert.equal(spawnPosition(full,360,size,c),null);
+});
+
+test('opening handoff and later supply maintain coverage without a vertical gap or overlaps',async()=>{
+  const {viewportLayout}=await layoutModule,{fieldPosition,openingFeed,streamLimit,spawnPosition}=await spawnModule,p=await physicsModule;
+  const c=createConfig(),size=c.tiles.mobileSize,layout=viewportLayout(360,640);
+  const incomingConfig={...c,falling:{...c.falling,letterLimit:streamLimit(layout,size,c)}};
+  for(let seed=1;seed<=5;seed++){
+    const random=rng(seed);let tiles=[],clock=0,maxGap=0,minVisible=Infinity;
+    const make=pos=>p.prepareTile({...pos,kind:'letter',letter:'E',tilt:.05,pitchOffset:.18,yawOffset:-.22,halfDepth:13.1},c,random);
+    for(let i=0;i<20;i++){const pos=fieldPosition(tiles,layout,size,random);if(pos)tiles.push(make(pos));}
+    const bridge=openingFeed(tiles,layout,size,c,random);
+    assert.ok(bridge.length>=8);assert.ok(new Set(bridge.map(t=>Math.round(t.y))).size>5);
+    tiles.push(...bridge.map(make));p.settleTiles(tiles,360,size,c.physics);
+    for(let frame=0;frame<900;frame++){
+      p.stepTiles(tiles,1/30,{width:360,size,speed:c.falling.pixelsPerSecond,config:c,random});
+      tiles=tiles.filter(t=>t.y<640+size);clock+=1/30;
+      if(clock>=c.falling.mobileSpawnSeconds){
+        clock%=c.falling.mobileSpawnSeconds;
+        const pos=spawnPosition(tiles,360,size,incomingConfig,random);
+        if(pos){assert.ok(pos.y+size/Math.SQRT2<0);tiles.push(make(pos));}
+      }
+      const ys=tiles.filter(t=>t.y>=140&&t.y<=446).map(t=>t.y).sort((a,b)=>a-b);
+      minVisible=Math.min(minVisible,ys.length);
+      const edges=[140,...ys,446];
+      for(let i=1;i<edges.length;i++)maxGap=Math.max(maxGap,edges[i]-edges[i-1]);
+      if(frame%30===0)for(let i=0;i<tiles.length;i++)for(let j=i+1;j<tiles.length;j++)assert.ok((p.contact(tiles[i],tiles[j],size)?.penetration||0)<.05);
+    }
+    assert.ok(maxGap<100,`Seed ${seed}: ${maxGap.toFixed(1)}px vertical gap`);
+    assert.ok(minVisible>=14,`Seed ${seed}: only ${minVisible} fully visible letters`);
+  }
 });

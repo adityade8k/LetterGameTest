@@ -240,10 +240,10 @@ test('selecting a grenade letter immediately releases smoke and still spells and
 test('grenade letters refresh smoke, including misspellings, but cannot activate after game over', () => {
   const game = create();
   game.select('C', 0, {grenade:true});
-  game.select('A', 4000, {grenade:true});
+  game.select('A', 1500, {grenade:true});
   assert.equal(game.effects.smoke, 5);
-  game.select('T', 4000);
-  assert.equal(game.select('Q', 4000, {grenade:true}).smokeTriggered, true);
+  game.select('T', 1500);
+  assert.equal(game.select('Q', 1500, {grenade:true}).smokeTriggered, true);
   assert.equal(game.current, '');
   assert.equal(game.effects.smoke, 5);
   const ending = create({timer: {startSeconds:4}});

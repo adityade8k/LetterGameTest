@@ -1,14 +1,9 @@
 import { exposedPosition } from './layout.mjs';
-// Keep one pick unfilled. Later picks release replacements into other open space.
+// Keep one pick unfilled. Later picks release replacements through the top edge.
 export class DeferredRefills {
-  constructor(settings){this.settings=settings;this.reset();}
-  reset(){this.pending=0;this.latest=null;this.recent=[];}
-  picked(tile,now){
-    this.pending++;
-    this.latest={x:tile.x,y:tile.y};
-    this.recent.push({...this.latest,until:now+this.settings.replacementCooldownSeconds});
-    this.recent=this.recent.slice(-16);
-  }
+  constructor(){this.reset();}
+  reset(){this.pending=0;}
+  picked(){this.pending++;}
   budget(visible,target,afterPick=false){
     const ready=Math.max(0,this.pending-1);
     if(afterPick)return Math.min(1,ready);
@@ -16,22 +11,17 @@ export class DeferredRefills {
     return Math.min(2,Math.max(ready,target-Math.min(1,this.pending)-visible));
   }
   placed(){if(this.pending>1)this.pending--;}
-  get gaps(){return this.recent;}
-  blocked(now){
-    return this.latest?[this.latest,...this.recent.filter(point=>point.until>now)]:[];
-  }
 }
 
 // Constant supply with collision-safe incoming and replacement positions.
 export function hasLetterRoom(tiles,limit){
   return tiles.reduce((count,tile)=>count+(tile.kind==='letter'?1:0),0)<limit;
 }
-export function fieldPosition(tiles,layout,size,random=Math.random,blocked=[],knownGaps=[]){
+// Scattered positions are used only for the opening board.
+export function fieldPosition(tiles,layout,size,random=Math.random){
   const margin=size/Math.SQRT2+5,clearance=size*1.4;
   const candidates=[];
   for(let i=0;i<100;i++)candidates.push({x:margin+random()*(layout.width-2*margin),y:margin+random()*(layout.height-2*margin)});
-  // Older cleared spaces are a fallback after random gaps, never an immediate refill.
-  candidates.push(...knownGaps);
   // A randomized grid fallback finds a genuine gap on crowded boards.
   const grid=[];
   for(let y=margin;y<=layout.height-margin;y+=size*1.4)for(let x=margin;x<=layout.width-margin;x+=size*1.4)grid.push({x,y});
@@ -40,13 +30,32 @@ export function fieldPosition(tiles,layout,size,random=Math.random,blocked=[],kn
   let best=null,bestDistance=-1;
   for(const point of candidates){
     if(!exposedPosition(point.x,point.y,layout,margin))continue;
-    if(blocked.some(tap=>Math.hypot(point.x-tap.x,point.y-tap.y)<size*1.4))continue;
     const distance=tiles.reduce((nearest,tile)=>Math.min(nearest,Math.hypot(point.x-tile.x,point.y-tile.y)),Infinity);
     if(distance>=clearance)return point;
     if(distance>bestDistance){best=point;bestDistance=distance;}
   }
-  // The soft solver can nudge a slightly tighter gap, but never a protected tap.
+  // The soft solver can nudge a slightly tighter opening gap.
   return bestDistance>=size*1.08?best:null;
+}
+// Include the travel hidden behind both panels in the population budget. A cap
+// based only on exposed choices stops arrivals before outgoing tiles leave.
+export function streamLimit(layout,size,config){
+  const columns=Math.max(1,Math.floor(layout.width/(size+config.tiles.gapPixels)));
+  return Math.max(config.falling.letterLimit,columns*Math.ceil((layout.height+size*2)/(size*1.45)));
+}
+// At round start, continue the opening board back through the header to the
+// top entrance. Independent column phases avoid a second synchronized wave.
+export function openingFeed(tiles,layout,size,config,random=Math.random){
+  const columns=Math.max(1,Math.floor(layout.width/(size+config.tiles.gapPixels)));
+  const spacing=size*1.45,positions=[];
+  const firstPanel=layout.panels[0],bottom=firstPanel.y+firstPanel.h+size*.6;
+  for(let column=0;column<columns;column++){
+    const x=(column+.5)*layout.width/columns+(random()-.5)*8;
+    for(let y=bottom-random()*spacing;y>=-size;y-=spacing){
+      if([...tiles,...positions].every(tile=>Math.hypot(tile.x-x,tile.y-y)>=spacing))positions.push({x,y});
+    }
+  }
+  return positions;
 }
 export function spawnPosition(tiles,width,size,config,random=Math.random){
   if(!hasLetterRoom(tiles,config.falling.letterLimit))return null;

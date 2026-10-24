@@ -180,6 +180,8 @@ export function createUI(font, config, reducedMotion=false) {
   icon(submit.root,'arrow',239,24,{material:'muted',scale:.8,z:5});
   const undo=button(playing,'undo','',292,498,46,46);
   icon(undo.root,'undo',23,16,{scale:.8,z:5});text(undo.root,`-${fmt(config.penalties.clearWordSeconds)}s`,23,32,{size:6.4,align:'center',material:'muted',z:5});
+  const letterTimer=panel(submit.root,13,41,230,2,'ink',1,7,.25);
+  letterTimer.visible=false;
   text(playing,'WORDS COLLECTED',22,561,{size:6.7,spacing:.5});
   const collection=button(playing,'collection','',20,553,320,49,{quiet:true});collection.label='View collected words';
 
@@ -257,7 +259,7 @@ export function createUI(font, config, reducedMotion=false) {
     slot('menu',menuContent,key,g=>{
       restart.root.visible=mode==='paused';previous.root.visible=next.root.visible=mode==='collection';
       const help=mode==='help', collecting=mode==='collection';
-      plinth(g,24,help?97:collecting?130:mode==='over'?161:192,312,help?459:collecting?390:mode==='over'?308:278,18);
+      plinth(g,24,help?97:collecting?130:mode==='over'?161:192,312,help?487:collecting?390:mode==='over'?308:278,18);
       if(mode==='paused') {
         text(g,'TAKE YOUR TIME.',180,215,{size:7,align:'center',spacing:.6});
         text(g,'A little breather.',180,239,{size:24,align:'center',maxWidth:272,raised:true});
@@ -273,7 +275,8 @@ export function createUI(font, config, reducedMotion=false) {
         text(g,'A FEW LITTLE THINGS.',180,119,{size:6.5,align:'center',spacing:.6});
         text(g,'Find your flow.',180,143,{size:25,align:'center',raised:true});
         lines(g,`Tap letters in order. Tap your word to submit.\n${config.rules.minWordLength}+ letters. No repeated words.`,180,187,{size:8,align:'center',lineHeight:14});
-        text(g,'Blank = any letter. Zero points.',180,217,{size:7,align:'center',material:'muted'});
+        text(g,`After ${fmt(config.rules.nextLetterSeconds)}s: valid words auto-submit.`,180,216,{size:7,align:'center',material:'muted'});
+        text(g,'Blank = any letter. Zero points.',180,228,{size:6.5,align:'center',material:'muted'});
         const rows=[
           ['arrow','Think a little bigger.',`3 letters: up to ${fmt(config.rewards.threeLetterMaxSeconds)}s. 4 letters: up to ${fmt(config.rewards.fourLetterMaxSeconds)}s.\n5+ letters buy you real time.`],
           ['gold','Gold adds extra time.','Even on short words. Points stay the same.'],
@@ -281,7 +284,8 @@ export function createUI(font, config, reducedMotion=false) {
           ['grenade','Watch the grenade.',`After ${fmt(config.specialTiles.warmupSeconds)}s, marked letters release\n${fmt(config.smoke.durationSeconds)} seconds of smoke when used.`],
         ];
         rows.forEach(([kind,title,body],i)=>{const y=240+i*52;if(kind==='gold')text(g,`x${config.bonusLetters.timeMultiplier}`,52,y,{size:13,align:'center',material:'muted'});else icon(g,kind,52,y+8,{scale:.8,material:'muted'});text(g,title,74,y,{size:8.4});lines(g,body,74,y+17,{width:220,size:7,lineHeight:12});});
-        lines(g,`Clear word: -${fmt(config.penalties.clearWordSeconds)}s. Repeat: -${fmt(config.penalties.repeatWordSeconds)}s.\nMisspell or submit unfinished: -${fmt(config.penalties.invalidWordSeconds)}s.`,180,462,{size:7.3,lineHeight:13,align:'center'});
+        if(config.combo.enabled)lines(g,`${config.combo.wordsToStart} quick words unlock more thinking time.\nUp to ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)}s per letter. A miss or ${fmt(config.combo.maxGapSeconds)}s gap resets it.`,180,492,{size:6.6,lineHeight:12,align:'center'});
+        lines(g,`Clear / invalid timeout: -${fmt(config.penalties.clearWordSeconds)}s. Repeat: -${fmt(config.penalties.repeatWordSeconds)}s.\nMisspell or submit unfinished: -${fmt(config.penalties.invalidWordSeconds)}s.`,180,462,{size:7.3,lineHeight:13,align:'center'});
       }else if(collecting){
         text(g,'A COLLECTION OF GOOD IDEAS.',180,151,{size:6,align:'center',spacing:.4});
         text(g,'Your words.',180,174,{size:25,align:'center',raised:true});
@@ -290,7 +294,7 @@ export function createUI(font, config, reducedMotion=false) {
         text(g,`${collectionPage+1} / ${collectionPages}`,180,437,{size:8,align:'center',material:'muted'});
       }
       const label=help?'Got it':collecting?'Back to the letters':mode==='over'?'Play again':'Keep going';
-      menuPrimary.label=label;menuPrimary.layoutY=help?505:collecting?472:391;menuPrimary.root.position.y=-menuPrimary.layoutY;
+      menuPrimary.label=label;menuPrimary.layoutY=help?531:collecting?472:391;menuPrimary.root.position.y=-menuPrimary.layoutY;
       slot('menuButton',menuPrimary.root,label,g=>text(g,label,17,15,{size:11.5,material:'lightText',maxWidth:207,z:5}));
     });
   }
@@ -320,11 +324,18 @@ export function createUI(font, config, reducedMotion=false) {
       pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
       slot('sound',sound.root,view.soundOn,g=>{icon(g,view.soundOn?'sound':'silent',19,17,{scale:.65,material:'ink',z:6});text(g,view.soundOn?'Sound on':'Sound off',40,12,{size:8,material:'ink',z:6});});
       sound.label=`Turn sound ${view.soundOn?'off':'on'}`;
-      const signature=game.current+game.currentTiles.map(t=>t.blank?'?':t.bonus?'1':'0').join('')+phase;
+      const signature=game.current+game.currentTiles.map(t=>t.blank?'?':t.bonus?'1':'0').join('')+phase+':'+game.letterWindow;
+      letterTimer.visible=Boolean(game.current)&&phase!=='over';
+      letterTimer.scale.x=Math.max(.001,game.letterSeconds/game.letterWindow);
       slot('word',playing,signature,g=>{
-        text(g,game.current?`${game.current.length} ${game.current.length===1?'LETTER':'LETTERS'} / TAP TO SUBMIT`:'PICK LETTERS IN ORDER',338,481,{size:5.8,align:'right',material:'muted',maxWidth:194});
+        text(g,game.current?`${fmt(game.letterWindow)}s / ADD LETTER OR AUTO-SUBMIT`:'PICK LETTERS IN ORDER',338,481,{size:5.8,align:'right',material:'muted',maxWidth:194});
         if(game.current)text(g,game.current,35,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.bonus?'gold':'ink'),z:7});
         else text(g,'Catch a few letters...',35,516,{size:9,material:'muted',maxWidth:211,z:7});
+      });
+      const comboActive=game.comboBonusSeconds>0;
+      slot('combo',playing,`${game.comboCount}:${game.nextLetterWindow}`,g=>{
+        if(!game.comboCount)return;
+        text(g,comboActive?`COMBO ${game.comboCount} / ${fmt(game.nextLetterWindow)}s PER LETTER`:`CHAIN ${game.comboCount} / ${config.combo.wordsToStart}`,35,549,{size:5.5,material:comboActive?'ink':'muted',spacing:.2,maxWidth:230});
       });
       setEnabled(submit,phase==='running'&&Boolean(game.current));setEnabled(undo,phase==='running'&&Boolean(game.current));
       submit.label=game.current?`Submit ${game.current}`:'Submit current word';undo.label=`Clear whole word, ${fmt(config.penalties.clearWordSeconds)} second penalty`;
@@ -379,10 +390,10 @@ export function createUI(font, config, reducedMotion=false) {
     description(game,view){
       if(mode==='paused')return 'Paused. A little breather. Your letters are right where you left them. The clock can wait.';
       if(mode==='over')return `Time to exhale. ${game.score} points from ${game.wordCount} words. Best ${view.best}.`;
-      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
+      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. The letter countdown starts at ${fmt(config.rules.nextLetterSeconds)} seconds. On expiry, a valid unused word submits automatically; an unfinished word is discarded for a ${fmt(config.penalties.clearWordSeconds)} second penalty. Repeats still cost time. ${config.combo.enabled?`${config.combo.wordsToStart} consecutive words less than ${fmt(config.combo.maxGapSeconds)} active seconds apart unlock a combo, adding ${fmt(config.combo.extraSecondsPerWord)} seconds per further word, capped at ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)} seconds per letter. Any failed or discarded word, or a gap of ${fmt(config.combo.maxGapSeconds)} seconds without a word, resets the combo.`:''} Pausing freezes both timers. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
-      return `${phase==='ready'?'CLTTR. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
+      return `${phase==='ready'?'CLTTR. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.letterSeconds.toFixed(1)} seconds. Letter window ${fmt(game.letterWindow)} seconds.`:''}${game.comboCount?` ${game.comboBonusSeconds>0?'Combo':'Chain'} ${game.comboCount}. Next-letter window ${fmt(game.nextLetterWindow)} seconds. Chain expires in ${Math.ceil(game.comboSeconds)} seconds.`:''} Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
     },
   };
 }

@@ -2,7 +2,7 @@ import { DESIGN } from './design.js';
 import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
-import { spawnPosition, fieldPosition, DeferredRefills } from './spawn.mjs';
+import { spawnPosition, fieldPosition, openingFeed, streamLimit, DeferredRefills } from './spawn.mjs';
 import { exposedPosition, letterTarget } from './layout.mjs';
 
 // Only the WebGL canvas is attached to the page. The interface and its hit
@@ -10,7 +10,7 @@ import { exposedPosition, letterTarget } from './layout.mjs';
 if(document.readyState==='loading')await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
 const game=new Letterfall.WordGame(LETTERFALL_WORDS);
 const config=game.config,motion=LetterfallMotion;
-const refills=new DeferredRefills(config.falling);
+const refills=new DeferredRefills();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -58,6 +58,9 @@ function seed() {
     const position=fieldPosition(tiles,layout,size);
     if(position)tiles.push(makeTile(letter,position.x,position.y));
   }
+  for(const position of openingFeed(tiles,layout,size,config)){
+    tiles.push(makeTile(nextLetter(),position.x,position.y));
+  }
   settleTiles(tiles,width,size,config.physics);
 }
 function nextLetter() {
@@ -71,23 +74,27 @@ function updateLayout(){
   settleTiles(tiles,width,size,config.physics);
 }
 function exposedTile(tile){return exposedPosition(tile.x,tile.y,layout,size/2)&&!scene.ui.obscures(tile.x,tile.y,size/2);}
+function topEntry(){
+  const limit=streamLimit(layout,size,config);
+  return spawnPosition(tiles,width,size,{...config,falling:{...config.falling,letterLimit:limit}});
+}
 function refillChoices(afterPick=false){
   if(game.phase!=='running')return;
   const visible=tiles.filter(tile=>tile.kind==='letter'&&exposedTile(tile)).length;
   const budget=refills.budget(visible,letterTarget(layout,config),afterPick);
-  const blocked=refills.blocked(game.elapsed);
   for(let i=0;i<budget;i++){
-    const position=fieldPosition(tiles,layout,size,Math.random,blocked,refills.gaps);if(!position)break;
+    // Replacements queue at the same top edge as normal drops, never in the field.
+    const position=topEntry();if(!position)break;
     tiles.push(makeTile(nextLetter(),position.x,position.y,true));
     refills.placed();
   }
   settleTiles(tiles,width,size,config.physics);
 }
 function spawn() {
-  refillChoices();
-  const limit=Math.max(config.falling.letterLimit,letterTarget(layout,config)+Math.min(16,Math.ceil(width/size)*2));
-  const position=spawnPosition(tiles,width,size,{...config,falling:{...config.falling,letterLimit:limit}});
-  if(position)tiles.push(makeTile(nextLetter(),position.x,position.y));
+  // One arrival per opportunity keeps the stream staggered instead of batching
+  // maintenance replacements with a second ordinary drop.
+  const position=topEntry();
+  if(position){tiles.push(makeTile(nextLetter(),position.x,position.y));refills.placed();}
 }
 function offerHourglass() {
   tiles=tiles.filter(tile=>tile.kind!=='hourglass');
@@ -96,12 +103,12 @@ function offerHourglass() {
 function handle(result){
   if(!result||result.type==='ignored')return;
   if(result.type==='word'){
-    if(result.hourglassOffered)offerHourglass();
+    if(result.hourglassOffered&&game.phase!=='over')offerHourglass();
     if(game.score>best){best=game.score;try{localStorage.setItem(storageKey,String(best));}catch{}}
     view.feedback='';view.feedbackKind='';feedbackUntil=0;
     scene.ui.celebrate(result,game);tone('word');
   }else if(result.type==='penalty'){
-    const reason={repeat:'Already collected',clear:'Word cleared',spelling:'No word starts that way',incomplete:'Not a complete word'}[result.reason];
+    const reason={repeat:'Already collected',clear:'Word cleared',timeout:'Word timed out',spelling:'No word starts that way',incomplete:'Not a complete word'}[result.reason];
     feedback(`${reason} / -${format(result.penalty)}s`,'bad');tone('penalty');
   }else if(result.type==='effect'){feedback(`Slow time / ${format(result.duration)} seconds`,'slow');tone('word');}
   else if(result.type==='letter')tone('letter');
@@ -114,9 +121,9 @@ function pick(tile){
   if(tile.bornAt!==undefined&&game.elapsed-tile.bornAt<config.falling.replacementFadeSeconds)return;
   view.focus='';
   const result=tile.kind==='hourglass'?game.collectHourglass(performance.now()):game.select(tile.letter,performance.now(),tile);
-  if(['letter','penalty','effect'].includes(result.type)){
+  if(result.consumed!==false&&['letter','penalty','effect'].includes(result.type)){
     tiles=tiles.filter(item=>item!==tile);scene.burst(tile);hover=null;
-    if(tile.kind==='letter'&&game.phase==='running')refills.picked(tile,game.elapsed);
+    if(tile.kind==='letter'&&game.phase==='running')refills.picked();
   }
   handle(result);refillChoices(true);updateLabel();
 }
@@ -236,7 +243,7 @@ try{
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
       tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
-      spawnClock+=worldDt;if(spawnClock>=config.falling.mobileSpawnSeconds){spawnClock=0;spawn();}
+      spawnClock+=worldDt;if(spawnClock>=config.falling.mobileSpawnSeconds){spawnClock%=config.falling.mobileSpawnSeconds;spawn();}
     }
     if(now>feedbackUntil){view.feedback='';view.feedbackKind='';}
     sync();scene.render(tiles,game,dt,now,hover,view);

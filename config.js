@@ -13,7 +13,14 @@
       maxSeconds: 120,             // Overtime: up to 200% of the 60-second starting limit.
       lowTimeSeconds: 15,
     },
-    rules: { minWordLength: 3 },
+    rules: { minWordLength: 3, nextLetterSeconds: 2 }, // Base active seconds between letters; expiry resolves the word.
+    combo: {
+      enabled: true,
+      wordsToStart: 3,             // Third consecutive quick word unlocks extra thinking time.
+      maxGapSeconds: 8,            // Reset after this many active seconds without a new word.
+      extraSecondsPerWord: 0.25,   // Third word and every further quick word add this much.
+      maxExtraSeconds: 1,          // Added to rules.nextLetterSeconds: default cap is 3s.
+    },
     wildcards: {
       chance: 0.05,                // Blank tiles among new letters; resolve automatically on submit.
       openingTiles: 1,             // Opening blanks replace filler; guaranteed words keep their letters.
@@ -64,17 +71,16 @@
       color: '#e891b0',
     },
     penalties: {
-      clearWordSeconds: 2,          // Undo / Backspace clears the entire word.
+      clearWordSeconds: 2,          // Undo or an invalid timeout discards the entire word.
       repeatWordSeconds: 2,
       invalidWordSeconds: 5,        // Impossible prefix or unfinished submission.
     },
     falling: {
       pixelsPerSecond: 31.32,      // Constant Three.js pace, unaffected by elapsed time or word count.
       letterLimit: 26,             // Minimum budget for top drops; grows with viewport, excludes pickups.
-      visibleLetterTarget: 20,     // Exposed choices before a pick; newest pick stays unfilled.
+      visibleLetterTarget: 20,     // Opening target; refill demand sends incoming letters from above.
       maxVisibleLetters: 48,
-      replacementFadeSeconds: 0.14,// Quiet fade into an open gap after a later selection.
-      replacementCooldownSeconds: 0.45, // Keep recent tap areas clear, plus the newest pick until another pick.
+      replacementFadeSeconds: 0.14,// Replacements fade in above the screen before falling into view.
       // Legacy p5 speed curve below; Three.js uses pixelsPerSecond above.
       minPixelsPerSecond: 31.32,
       maxPixelsPerSecond: 59.4,
@@ -193,7 +199,6 @@
     for (const key of ['desktopSpawnSeconds', 'mobileSpawnSeconds']) number('falling', key, 0, true);
     number('falling', 'pixelsPerSecond', 0, true);
     number('falling', 'replacementFadeSeconds', 0, true);
-    number('falling', 'replacementCooldownSeconds', 0, true);
     for (const key of ['visibleLetterTarget', 'maxVisibleLetters']) {
       if (!Number.isInteger(config.falling[key]) || config.falling[key] < 8) throw new Error(`config.js: falling.${key} must be an integer of at least 8.`);
     }
@@ -224,6 +229,12 @@
     for (const key of ['desktopSize', 'mobileSize', 'mobileBreakpoint']) number('tiles', key, 0, true);
     for (const key of ['gapPixels', 'hitPaddingPixels']) number('tiles', key);
     number('feedback', 'durationSeconds');
+    number('rules', 'nextLetterSeconds', 0, true);
+    if (typeof config.combo.enabled !== 'boolean') throw new Error('config.js: combo.enabled must be true or false.');
+    if (!Number.isInteger(config.combo.wordsToStart) || config.combo.wordsToStart < 1) throw new Error('config.js: combo.wordsToStart must be a positive integer.');
+    number('combo', 'maxGapSeconds', 0, true);
+    number('combo', 'extraSecondsPerWord');
+    number('combo', 'maxExtraSeconds');
     if (!Number.isInteger(config.rules.minWordLength) || config.rules.minWordLength < 1) throw new Error('config.js: rules.minWordLength must be a positive integer.');
     for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
       number('letterPoints', letter, 0, true);

@@ -32,8 +32,17 @@ The single canvas has a descriptive accessibility label reflecting the current w
 - **Three-letter words:** 0.1 seconds per point, capped at **0.5 seconds** of ordinary time. **Four letters:** 0.25 seconds per point, capped at **2 seconds**. **Five or more letters:** **1.5 seconds per point**. Gold time is added after the short-word cap.
 - A repeated submission costs **2 seconds**. An impossible prefix or an incomplete submitted word costs **5 seconds**. Both clear the current word without reducing earned points. A used word may still be extended before submitting: CAT can become CATCH.
 - Undo clears the whole word for **2 seconds**. Empty undo does nothing. Selected tiles stay consumed.
-- No validity highlight, reward preview, or repeat warning appears before submission. The tray shows only the letters, count, and neutral submit prompt. Impossible prefixes still fail immediately.
+- After each letter (including a blank), the letter countdown starts at **2 active seconds**. On expiry, a **valid unused word automatically submits** with its normal points and time reward. An unfinished word is discarded for **2 seconds**; a repeated complete word gets the normal repeat penalty. Each outcome happens once. You can still tap to submit sooner or pick another letter to reset the countdown. A thin meter shows the remaining window. Pauses freeze it; hourglasses do not extend it. Tune `rules.nextLetterSeconds` to change the base window.
+- No validity highlight, reward preview, or repeat warning appears before submission. The tray shows the letters, a neutral automatic-submission prompt, and the countdown meter. Impossible prefixes still fail immediately.
 - Missing a falling tile carries no penalty. At zero, the round ends. The high score is the highest total letter points, saved in the browser; the collected-word count remains separate.
+
+## Quick-word combo
+
+Complete consecutive words **less than 8 active seconds apart** to build a chain. Manual and automatic submissions both count. The third word unlocks **2.25 seconds per letter**; the fourth gives **2.5**, the fifth **2.75**, and the sixth and later words cap at **3 seconds**. Points and round-clock rewards stay unchanged. A small Three.js label in the word tray shows chain progress and the boosted window, without large popups or validity hints.
+
+An invalid timeout, misspelling, repeat, unfinished submission, or manual discard resets the chain to zero and the next letter window to the base **2 seconds**. Going **8 active seconds without completing a new word** also resets it. Picking letters alone does not keep the chain alive. When a chain expires during a word, the current letter retains the countdown it was granted; the next pick uses the base window. Pausing freezes both countdowns, hourglasses do not stretch them, and starting a fresh round clears the chain.
+
+Tune `combo` in `config.js`: `enabled`, `wordsToStart` (3), `maxGapSeconds` (8), `extraSecondsPerWord` (0.25), and `maxExtraSeconds` (1). The cap adds to `rules.nextLetterSeconds`, so changing the base window keeps the maximum boost bounded.
 
 ## Opening and special tiles
 
@@ -50,9 +59,9 @@ Each round starts with randomly scattered letters supporting a **7-, 6-, 5-, and
 
 The Three.js game keeps a **constant 31.32 logical pixels/second** falling pace and the existing rotation behavior. Neither elapsed time nor collected-word count makes it harder. The former difficulty wave is removed. The hourglass still temporarily slows motion and the clock as before.
 
-Replenishment stays **one pick behind**: the first selection leaves a gap, and the second and later selections can each release one replacement into a random open space. The latest tap area remains protected until another tile is selected, and all recent tap areas have a **0.45-second cooldown**. Older cleared spaces are fallback candidates if other gaps are crowded; nothing is forced beneath the latest tap. A quiet **0.14-second fade** introduces each replacement. If there is no safe space yet, the replacement waits for one.
+Replenishment stays **one pick behind**: the first selection leaves a gap, and the second and later selections can each release one replacement **above the top edge**. Replacements fall into view at the normal configured speed. Nothing materializes in the middle of the play area or at a cleared tile position. If the top is crowded or the population budget is full, the replacement stays queued until there is safe entry space. Only the initial board is scattered within the field. At round start, additional staggered letters are already traveling behind the header, connecting that opening board to the incoming stream without an empty vertical stretch.
 
-Every **0.35 seconds**, supply also restores choices that have moved behind a panel or off screen and offers a normal drop from the top. This maintenance respects the same held-back selection and protected areas. The target is **20 exposed letters** before the first pick, then approximately 19 while replenishing one pick behind. Replacements use the current spelling's letter probabilities. Top drops have a separate population budget; hourglasses are excluded. Available space and soft collisions determine the actual population, so tiles are never stacked just to reach a count.
+Every **0.35 seconds**, supply attempts one collision-safe top entry, also servicing any queued replacement. It does not bundle several maintenance letters into rows. The opening targets **20 exposed letters**; the later visible count varies as tiles are selected, fall behind the panels, or enter from above. Replacements use the current spelling's letter probabilities. The population budget covers the whole travel distance, including tiles behind both panels (55 letters for the default frame), and excludes hourglasses. This keeps arrivals flowing while older tiles leave. Top-entry clearance and the contact solver prevent overlaps.
 
 Unassisted spawns use normalized English text frequencies from [Peter Norvig’s Google Books analysis](https://www.norvig.com/mayzner.html): common letters such as E, T, A, O, I, and N appear more often; rare letters remain possible. This replaces both the short-word bag and the old letter string. There is no forced word completion. `letterFrequency` in `config.js` contains all 26 editable weights. They affect supply only, not Scrabble scores.
 
@@ -81,12 +90,13 @@ Edit **`config.js`**, save, and refresh. Its comments explain the settings, unit
 | Group | Controls |
 | --- | --- |
 | `timer` | Starting, maximum, and low-time seconds |
-| `rules` | Minimum word length |
+| `rules` | Minimum word length and `nextLetterSeconds` base countdown window |
+| `combo` | Enable, qualifying word count, maximum gap, extra seconds per word, and cap |
 | `rewards` | Seconds per point, word-length rates, short-word base caps |
 | `penalties` | Clear, repeat, and misspelling penalties |
 | `opening.mobileTiles` | Minimum opening population; the full-field target can increase it |
 | `wildcards` | Blank probability and guaranteed opening blank count |
-| `falling` | Constant speed, minimum top-drop budget, visible-choice target and maximum, replacement fade, recent-tap cooldown, spawn interval; legacy p5 curve settings remain separate |
+| `falling` | Constant speed, minimum top-drop budget, visible-choice target and maximum, replacement fade above the screen, spawn interval; legacy p5 curve settings remain separate |
 | `letterFrequency` | Relative English letter frequencies for ordinary spawns and opening filler |
 | `celebration` | Reward-label duration, timer refill and score-count duration |
 | `wordAssist` | Extension-help toggle, trigger length, probability, lookahead, later-letter weight |
@@ -114,7 +124,7 @@ The Three.js version uses projected oriented-box collision detection with a two-
 
 - `three/materials.js`: hard two-tone cel shaders for objects; separate soft gradient, fog, and smoke shaders. No outlines; a small optional specular highlight is used on tile bodies.
 - `three/layout.mjs`: world bounds and panel placement within the portrait canvas, exposed-choice target.
-- `three/spawn.mjs`: collision-safe top entry, one-pick-delayed replenishment, protected tap areas, and open-gap placement.
+- `three/spawn.mjs`: collision-safe top entry, one-pick-delayed top-entry replenishment, and scattered opening placement.
 - `three/reward-motion.mjs`: animated score/time presentation without delaying actual rewards.
 - `three/letter-supply.mjs`: English-frequency sampling, cached dictionary-prefix lookup, and optional weighted continuation spawns.
 - `three/physics.mjs`: soft contact response and slower multi-axis turns with Y dominant on high-value tiles.
@@ -142,6 +152,6 @@ The references were sampled with equal per-image weight after excluding edge UI.
 npm test
 ```
 
-The 95 automated tests cover dictionary and wildcard resolution, unused-match preference, zero-point blank rewards, ambiguous-prefix continuation, repeats and penalties, time caps, gold, pause/restart, warm-up and special effects, side-entering smoke, English frequencies and word assistance, opening guarantees, portrait-world bounds, delayed replenishment across both picks and maintenance, protected tap areas, collision safety, rotation, and quiet reward animations.
+The 114 automated tests cover dictionary and wildcard resolution, unused-match preference, zero-point blank rewards, ambiguous-prefix continuation, repeats and penalties, time caps, gold, pause/restart, warm-up and special effects, side-entering smoke, English frequencies and word assistance, opening guarantees, portrait-world bounds, delayed top-entry replenishment across both picks and maintenance, blocked-entry queuing, continuous coverage through the opening handoff, automatic word submission, per-letter expiry and reset, capped combo growth and resets, late-input races, paused deadlines, collision safety, rotation, and quiet reward animations.
 
 Browser validation checks the centered portrait frame on phone and desktop, mesh button raycasts, keyboard focus, wildcard submission and scoring, replenishment, Undo, menus, collection, moving smoke, and the absence of HTML interface elements. A WebGL-capable modern browser is required.

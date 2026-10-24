@@ -69,18 +69,19 @@ test('submitting a viable but unfinished word is a penalty; an empty box is harm
 test('pause freezes the clock and prevents selecting, submitting, and undoing', () => {
   const game = create();
   spell(game, 'CAT', 1000);
-  game.pause(5000);
+  game.pause(2000);
   game.advance(100000);
   game.select('S', 100000); game.submit(100000); game.undo(100000);
-  assert.equal(game.remaining, 55);
+  assert.equal(game.remaining, 58);
   assert.equal(game.current, 'CAT');
   assert.equal(game.score, 0);
-  game.resume(100000); game.advance(102000);
-  assert.equal(game.remaining, 53);
+  game.resume(100000); game.advance(100500);
+  assert.equal(game.remaining, 57.5);
+  assert.equal(game.current, 'CAT');
 });
 test('expiry is based on elapsed time and late input cannot resurrect a round', () => {
   for (const action of ['submit', 'select', 'undo', 'pause']) {
-    const game = create(); spell(game, 'CAT');
+    const game = create(); spell(game, 'CA');
     const result = action === 'select' ? game.select('S', 61000) : game[action](61000);
     assert.equal(result.type, 'ended');
     assert.equal(game.phase, 'over');

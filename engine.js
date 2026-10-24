@@ -25,6 +25,9 @@
       this.current = '';
       this.currentTiles = [];
       this.currentPrefixes = [''];
+      this.letterSeconds = 0;
+      this.letterWindow = this.config.rules.nextLetterSeconds;
+      this.resetCombo();
       this.effects = { hourglass: 0, smoke: 0 };
       this.hourglassOffer = false;
       this.words = [];
@@ -37,6 +40,18 @@
     start(now) { this.reset(); this.phase = 'running'; this.lastTime = now; }
     get score() { return this.totalPoints; }
     get wordCount() { return this.words.length; }
+    resetCombo() { this.comboCount = 0; this.comboSeconds = 0; }
+    get comboBonusSeconds() {
+      if (!this.config.combo.enabled) return 0;
+      const steps = Math.max(0, this.comboCount - this.config.combo.wordsToStart + 1);
+      return Math.min(this.config.combo.maxExtraSeconds, steps * this.config.combo.extraSecondsPerWord);
+    }
+    get nextLetterWindow() { return this.config.rules.nextLetterSeconds + this.comboBonusSeconds; }
+    recordComboWord() {
+      if (!this.config.combo.enabled) return;
+      this.comboCount++;
+      this.comboSeconds = this.config.combo.maxGapSeconds;
+    }
     get specialTilesUnlocked() { return this.elapsed >= this.config.specialTiles.warmupSeconds; }
     rollTileTraits(random = Math.random) {
       return {
@@ -87,6 +102,24 @@
       // Never cap this delta: a slow frame must not give the player free time.
       const seconds = Math.max(0, now - this.lastTime) / 1000;
       this.lastTime = Math.max(this.lastTime, now);
+      // Resolve inactivity at its exact deadline, before any remaining frame time.
+      const untilDeadline = this.current ? this.letterSeconds : Infinity;
+      const end = this.elapse(Math.min(seconds, untilDeadline));
+      if (end) return end;
+      if (seconds < untilDeadline) return null;
+      // Use the same scoring path as a tap: blanks, repeats, gold, and pickups
+      // retain their rules. An unfinished prefix keeps the discard penalty.
+      const timeout = this.isWord ? this.finishWord(true) : this.penalize('timeout');
+      if (this.phase === 'running') {
+        const lateEnd = this.elapse(seconds - untilDeadline);
+        // Preserve an auto-submission even if the rest of a delayed frame ends
+        // the round, so presentation still saves its score and personal best.
+        if (lateEnd) return timeout.type === 'word'
+          ? { ...timeout, ended: true, hourglassOffered: false } : lateEnd;
+      }
+      return timeout;
+    }
+    elapse(seconds) {
       // Integrate across the exact moment a slow-time effect expires. Effects
       // count down in unscaled active time, even while the round clock is slow.
       const slowSeconds = Math.min(seconds, this.effects.hourglass);
@@ -96,6 +129,9 @@
         ? this.remaining / this.config.hourglass.timeScale
         : Math.min(seconds, slowSeconds + this.remaining - slowDrain);
       this.elapsed += activeSeconds;
+      this.comboSeconds = Math.max(0, this.comboSeconds - activeSeconds);
+      if (this.comboSeconds <= 1e-9) this.resetCombo(); // Ignore floating-point residue at the boundary.
+      if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - activeSeconds);
       this.effects.hourglass = Math.max(0, this.effects.hourglass - activeSeconds);
       this.effects.smoke = Math.max(0, this.effects.smoke - activeSeconds);
       this.remaining = Math.max(0, this.remaining - drain);
@@ -103,7 +139,7 @@
       return null;
     }
     discardHourglass() { this.hourglassOffer = false; }
-    clearEffects() { this.effects.hourglass = 0; this.effects.smoke = 0; this.discardHourglass(); }
+    clearEffects() { this.effects.hourglass = 0; this.effects.smoke = 0; this.discardHourglass(); this.resetCombo(); }
     activate(effect, now) {
       const end = this.advance(now);
       if (end) return end;
@@ -116,13 +152,13 @@
     }
     collectHourglass(now) {
       const end = this.advance(now);
-      if (end) return end;
+      if (end) return { ...end, consumed: false };
       if (this.phase !== 'running' || !this.hourglassOffer) return { type: 'ignored' };
       return this.activate('hourglass', now);
     }
     select(letter, now, options = {}) {
       const end = this.advance(now);
-      if (end) return end;
+      if (end) return { ...end, consumed: false };
       if (this.phase !== 'running' || !/^[A-Z?]$/i.test(letter)) return { type: 'ignored' };
       const blank=letter==='?' || options.blank===true,symbol=blank?'?':letter.toUpperCase();
       const next=[];
@@ -132,6 +168,10 @@
       this.current += symbol;
       this.currentPrefixes=next;
       this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:!blank && options.grenade===true });
+      // Honor the window earned when this letter is selected, even if the
+      // chain expires mid-countdown. The following pick uses the current boost.
+      this.letterWindow = this.nextLetterWindow;
+      this.letterSeconds = this.letterWindow;
       const result = next.length ? { type: 'letter', word: this.current } : this.penalize('spelling');
       // Using a marked letter releases smoke even if it creates a bad prefix.
       // It cannot revive effects after a penalty ends the round.
@@ -145,6 +185,9 @@
       const end = this.advance(now);
       if (end) return end;
       if (this.phase !== 'running' || !this.current) return { type: 'ignored' };
+      return this.finishWord();
+    }
+    finishWord(automatic = false) {
       if (!this.isWord) return this.penalize('incomplete');
       // Check repetition on submission so a used CAT can still become CATCH.
       if (this.isRepeat) return this.penalize('repeat');
@@ -156,22 +199,27 @@
       this.wordScores.set(word,points);
       this.totalPoints += points;
       this.used.add(word);
+      this.recordComboWord();
       this.current = '';
       this.currentTiles = [];
       this.currentPrefixes = [''];
+      this.letterSeconds = 0;
       const before = this.remaining;
       this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
       const hourglassOffered = this.specialTilesUnlocked && this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
       if (hourglassOffered) this.hourglassOffer = true;
-      return { type: 'word', word, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
+      return { type: 'word', automatic, comboCount: this.comboCount, letterWindow: this.nextLetterWindow, word, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
     }
     penalize(reason) {
+      this.resetCombo();
       const word = this.current;
       this.current = '';
       this.currentTiles = [];
       this.currentPrefixes = [''];
-      if (reason !== 'clear') this.mistakes++;
-      const penaltyKey = reason === 'repeat' ? 'repeatWordSeconds' : reason === 'clear' ? 'clearWordSeconds' : 'invalidWordSeconds';
+      this.letterSeconds = 0;
+      const discarded = reason === 'clear' || reason === 'timeout';
+      if (!discarded) this.mistakes++;
+      const penaltyKey = reason === 'repeat' ? 'repeatWordSeconds' : discarded ? 'clearWordSeconds' : 'invalidWordSeconds';
       const penalty = this.config.penalties[penaltyKey];
       this.remaining = Math.max(0, this.remaining - penalty);
       if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); }
@@ -185,9 +233,8 @@
     }
     pause(now) {
       const end = this.advance(now);
-      if (end) return end;
       if (this.phase === 'running') this.phase = 'paused';
-      return { type: 'paused' };
+      return end || { type: 'paused' };
     }
     resume(now) {
       if (this.phase === 'paused') { this.phase = 'running'; this.lastTime = now; }
