@@ -1,5 +1,18 @@
+// Independent weighted draws from English text frequencies, not Scrabble tile
+// counts or a bag of short words. Config weights are normalized automatically.
+export class FrequencyLetterSupply {
+  constructor(weights,random=Math.random){
+    this.random=random;this.total=0;
+    this.entries=Object.entries(weights).filter(([letter,weight])=>/^[A-Z]$/.test(letter)&&weight>0).map(([letter,weight])=>({letter,end:this.total+=weight}));
+    if(!this.total||!Number.isFinite(this.total))throw new Error('Letter frequencies need a positive finite total.');
+  }
+  next(){
+    const draw=this.random()*this.total;
+    return (this.entries.find(entry=>draw<entry.end)||this.entries.at(-1)).letter;
+  }
+}
 // Optional prefix-based help. It only changes newly spawned letters; the
-// original random generator remains responsible for every unassisted spawn.
+// frequency sampler remains responsible for every unassisted spawn.
 export class PrefixLetterSupply {
   constructor(dictionary, settings, random = Math.random) {
     this.words = [...new Set([...dictionary].map(word => word.toUpperCase()).filter(word => /^[A-Z]+$/.test(word)))].sort();

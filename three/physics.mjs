@@ -21,6 +21,7 @@ export function prepareTile(tile,config,random=Math.random){
   return tile;
 }
 function rotate(tile,dt,config,reducedMotion,random){
+  if(dt<=0)return;
   if(reducedMotion&&config.rotation.respectReducedMotion)return;
   if(!config.rotation.maxDegreesPerSecond)return;
   tile.age+=dt;

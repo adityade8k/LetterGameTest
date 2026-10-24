@@ -29,7 +29,7 @@
       for (const [letter, number] of Object.entries(counts)) required[letter] = Math.max(required[letter] || 0, number);
     }
     const letters = Object.entries(required).flatMap(([letter, number]) => Array(number).fill(letter));
-    while (letters.length < count) letters.push(filler[Math.min(filler.length - 1, Math.floor(random() * filler.length))]);
+    while (letters.length < count) letters.push(typeof filler === 'function' ? filler() : filler[Math.min(filler.length - 1, Math.floor(random() * filler.length))]);
     for (let index = letters.length - 1; index > 0; index--) {
       const other = Math.floor(random() * (index + 1));
       [letters[index], letters[other]] = [letters[other], letters[index]];

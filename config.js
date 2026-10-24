@@ -16,8 +16,8 @@
     rules: { minWordLength: 3 },
     opening: {
       desktopTiles: 14,
-      mobileTiles: 10,              // Each opening supports 7-, 6-, 5-, 3-letter words.
-      maxHeightFraction: 0.68,       // Leave room below the opening letters to fall.
+      mobileTiles: 16,              // Each opening supports 7-, 6-, 5-, 3-letter words.
+      maxHeightFraction: 0.88,       // Scatter the larger opening throughout the playfield.
     },
     rewards: {
       secondsPerPoint: 1,           // Global time-reward scale; points stay unchanged.
@@ -34,7 +34,7 @@
       borderColor: '#b89a45',
     },
     specialTiles: {
-      warmupSeconds: 10,           // Active play before grenade tiles/hourglass drops unlock.
+      warmupSeconds: 20,           // Active-play delay; independent of the constant game pace.
     },
     hourglass: {
       enabled: true,
@@ -63,11 +63,27 @@
       invalidWordSeconds: 5,        // Impossible prefix or unfinished submission.
     },
     falling: {
-      minPixelsPerSecond: 31.32,    // 20% faster across the whole falling-speed curve.
+      pixelsPerSecond: 31.32,      // Constant Three.js pace, unaffected by elapsed time or word count.
+      letterLimit: 26,             // Incoming/outgoing letters included; hourglass pickups excluded.
+      // Legacy p5 speed curve below; Three.js uses pixelsPerSecond above.
+      minPixelsPerSecond: 31.32,
       maxPixelsPerSecond: 59.4,
       increasePerWord: 1.188,      // Acceleration depends on word count, not points.
       desktopSpawnSeconds: 0.45,    // 20% more spawn opportunities per second.
-      mobileSpawnSeconds: 0.6,
+      mobileSpawnSeconds: 0.35,    // More letter choices, with collision-safe top-entry spacing.
+    },
+    letterFrequency: {
+      // English text percentages: Peter Norvig, Google Books corpus analysis.
+      // https://www.norvig.com/mayzner.html — relative weights, not scores.
+      A:8.04, B:1.48, C:3.34, D:3.82, E:12.49, F:2.40, G:1.87,
+      H:5.05, I:7.57, J:0.16, K:0.54, L:4.07, M:2.51, N:7.23,
+      O:7.64, P:2.14, Q:0.12, R:6.28, S:6.51, T:9.28, U:2.73,
+      V:1.05, W:1.68, X:0.23, Y:1.66, Z:0.09,
+    },
+    celebration: {
+      durationSeconds: 1.1,       // Small reward labels fade beside the score and clock.
+      timerRefillSeconds: 0.65,   // Visual refill only; earned time applies immediately.
+      scoreCountSeconds: 0.35,
     },
     wordAssist: {
       enabled: true,              // Experimental help for extending the selected word.
@@ -160,6 +176,11 @@
     for (const key of Object.keys(defaults.penalties)) number('penalties', key);
     for (const key of ['minPixelsPerSecond', 'maxPixelsPerSecond', 'increasePerWord']) number('falling', key);
     for (const key of ['desktopSpawnSeconds', 'mobileSpawnSeconds']) number('falling', key, 0, true);
+    number('falling', 'pixelsPerSecond', 0, true);
+    if (!Number.isInteger(config.falling.letterLimit) || config.falling.letterLimit < config.opening.mobileTiles) throw new Error('config.js: falling.letterLimit must be an integer at least opening.mobileTiles.');
+    for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') number('letterFrequency', letter);
+    if (!Object.values(config.letterFrequency).some(weight => weight > 0)) throw new Error('config.js: letterFrequency needs at least one positive weight.');
+    for (const key of ['durationSeconds', 'timerRefillSeconds', 'scoreCountSeconds']) number('celebration', key, 0, true);
     if (typeof config.wordAssist.enabled !== 'boolean') throw new Error('config.js: wordAssist.enabled must be true or false.');
     for (const key of ['minPrefixLength', 'lookAhead']) {
       if (!Number.isInteger(config.wordAssist[key]) || config.wordAssist[key] < 1) throw new Error(`config.js: wordAssist.${key} must be a positive integer.`);

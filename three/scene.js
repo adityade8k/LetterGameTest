@@ -32,7 +32,7 @@ export async function createScene(host, config, reducedMotion) {
   canvas.tabIndex = 0; canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-label', 'Loading falling letters');
   host.append(canvas);
   const font = await new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json');
-  const ui = createUI(font, config);
+  const ui = createUI(font, config, reducedMotion);
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
   camera.position.z = 60;
   const background = new THREE.Scene(), scene = new THREE.Scene();
@@ -139,7 +139,7 @@ export async function createScene(host, config, reducedMotion) {
     renderer.clearDepth();
     renderer.setScissor(0, host.clientHeight * (1 - (DESIGN.fieldTop + DESIGN.fieldHeight) / 640), host.clientWidth, host.clientHeight * DESIGN.fieldHeight / 640);
     renderer.setScissorTest(true); renderer.render(scene, camera); renderer.setScissorTest(false);
-    ui.sync(game, view); ui.animate(now);
+    ui.sync(game, view); ui.animate(now,dt,game);
     renderer.clearDepth(); renderer.render(ui.scene, camera);
   }
   return {
@@ -175,6 +175,6 @@ export async function createScene(host, config, reducedMotion) {
         scene.add(cloud);clouds.push(cloud);
       }
     },
-    reset() { for (const p of bursts) scene.remove(p.mesh); bursts.length = 0; for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
+    reset() { ui.reset();for (const p of bursts) scene.remove(p.mesh); bursts.length = 0; for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
   };
 }

@@ -3,10 +3,11 @@ import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { celMaterial } from './materials.js';
 import { DESIGN } from './design.js';
 import { createIcon } from './icons.js';
+import { RewardMeters, clamp01, easeOut } from './reward-motion.mjs';
 
 // Every visible interface element is geometry in this scene. There are no
 // DOM buttons, CSS labels, HTML textures, sprites, or CSS2D/CSS3D renderers.
-export function createUI(font, config) {
+export function createUI(font, config, reducedMotion=false) {
   const scene = new THREE.Scene();
   const palette = DESIGN.palette;
   const materials = {
@@ -28,6 +29,8 @@ export function createUI(font, config) {
   const fmt = n => String(Number(n.toFixed(2)));
   let phase = 'ready', mode = '', focus = '', hover = '', lastPress = '', pressUntil = 0;
   let collectionPage = 0, collectionPages = 1;
+  const meters=new RewardMeters(config.celebration),celebrations=[];
+  let lastBest=0;
 
   function group(parent = scene, x = 0, y = 0, z = 0) {
     const object = new THREE.Group();
@@ -154,6 +157,9 @@ export function createUI(font, config) {
   const timer=panel(hud,25,85,310,6,'ink',3,4,.6);
   const overtime=panel(hud,25,85,310,6,'gold',3,5.4,.4);
   overtime.visible=false;
+  const recharge=panel(hud,25,84,310,8,'mint',3,6.5,.4);
+  recharge.material=materials.mint.clone();recharge.material.transparent=true;recharge.material.depthWrite=false;recharge.visible=false;
+  const scoreAnchor=group(hud,244,39),clockAnchor=group(hud,338,65);
 
   plinth(intro,12,320,336,305,16);
   text(intro,'MAKE SOMETHING OF THE FALL.',180,334,{size:6.5,align:'center',spacing:.45});
@@ -175,6 +181,66 @@ export function createUI(font, config) {
   icon(undo.root,'undo',23,16,{scale:.8,z:5});text(undo.root,`-${fmt(config.penalties.clearWordSeconds)}s`,23,32,{size:6.4,align:'center',material:'muted',z:5});
   text(playing,'WORDS COLLECTED',22,561,{size:6.7,spacing:.5});
   const collection=button(playing,'collection','',20,553,320,49,{quiet:true});collection.label='View collected words';
+
+  // Small mesh labels stay inside the header, beside the values they update.
+  // The falling field and word tray remain unobstructed during rewards.
+  const rewardLayer=group(scene);
+  function fadeMaterials(root){
+    const clones=new Map();
+    root.traverse(object=>{
+      if(!object.isMesh)return;
+      const source=object.material;
+      if(!clones.has(source)){
+        const material=source.clone();material.transparent=true;material.depthWrite=false;
+        clones.set(source,material);
+      }
+      object.material=clones.get(source);
+    });
+    return [...clones.values()];
+  }
+  function setAlpha(list,alpha){for(const material of list){if(material.uniforms?.opacity)material.uniforms.opacity.value=alpha;else material.opacity=alpha;}}
+  function removeCelebration(item){item.root.removeFromParent();for(const material of item.materials)material.dispose();}
+  function celebrate(result,game){
+    meters.add(result.reward,result.points);
+    // Replace an earlier label instead of piling several rewards over the HUD.
+    for(const item of celebrations)removeCelebration(item);celebrations.length=0;
+    const root=group(rewardLayer),points=group(root,244,66,12),time=group(root,298,66,12);
+    text(points,`+${result.points}`,0,0,{size:9,align:'right',material:'muted',maxWidth:42});
+    text(time,result.reward>0?`+${fmt(result.reward)}s`:'MAX',0,0,{size:9,align:'right',material:'muted',maxWidth:42});
+    const pointMaterials=fadeMaterials(points),timeMaterials=fadeMaterials(time);
+    const ownedMaterials=[...pointMaterials,...timeMaterials];
+    const item={root,points,time,materials:ownedMaterials,pointMaterials,timeMaterials,age:0,result,startTime:meters.values(game.remaining,game.score).time};
+    celebrations.push(item);
+    animateCelebration(item);
+  }
+  function animateCelebration(item){
+    const {age,points,time}=item,duration=config.celebration.durationSeconds,t=clamp01(age/duration);
+    const alpha=clamp01(t/.12)*(1-clamp01((t-.55)/.45));
+    const rise=reducedMotion?0:2*easeOut(t);
+    points.position.y=time.position.y=-(66-rise);
+    setAlpha(item.pointMaterials,alpha);setAlpha(item.timeMaterials,alpha);
+  }
+  function syncMeters(game){
+    const shown=meters.values(game.remaining,game.score),timeRatio=shown.time/config.timer.startSeconds;
+    const extraCapacity=config.timer.maxSeconds-config.timer.startSeconds,inOvertime=shown.time>config.timer.startSeconds;
+    timer.scale.x=Math.max(.001,Math.min(1,timeRatio));
+    timer.material=materials[game.effects.hourglass>0?'mint':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
+    overtime.visible=inOvertime&&extraCapacity>0;
+    overtime.scale.x=Math.max(.001,Math.min(1,(shown.time-config.timer.startSeconds)/Math.max(.001,extraCapacity)));
+    const timeLabel=inOvertime?`OVERTIME / ${Math.ceil(timeRatio*100)}%`:'TIME';
+    slot('timeLabel',hud,timeLabel,g=>text(g,timeLabel,24,67,{size:6.2,material:'muted',spacing:.6}));
+    slot('clock',clockAnchor,Math.ceil(shown.time),g=>text(g,`${Math.ceil(shown.time)}s`,0,0,{size:10,align:'right',raised:true}));
+    slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:17,align:'right'}));
+    slot('best',hud,lastBest,g=>text(g,String(lastBest).padStart(2,'0'),291,39,{size:17,align:'right'}));
+    const latest=celebrations.at(-1),age=latest?.age??Infinity;
+    recharge.visible=Boolean(latest&&latest.result.reward>0&&age<1.15);
+    if(recharge.visible){
+      const base=inOvertime?config.timer.startSeconds:0,range=inOvertime?extraCapacity:config.timer.startSeconds;
+      const from=clamp01((latest.startTime-base)/range),to=clamp01((shown.time-base)/range);
+      recharge.position.x=25+from*310;recharge.scale.x=Math.max(.001,to-from);
+      recharge.material.uniforms.opacity.value=.28*(1-clamp01((age-.4)/.75));
+    }
+  }
 
   // Menu panels are in the same WebGL scene, with their own mesh backdrop.
   const dim=new THREE.Mesh(new THREE.PlaneGeometry(360,640),new THREE.MeshBasicMaterial({color:'#604d6d',transparent:true,opacity:.82,depthWrite:false}));
@@ -234,15 +300,8 @@ export function createUI(font, config) {
       phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.min(view.collectionPage,collectionPages-1);
       intro.visible=phase==='ready';playing.visible=phase!=='ready';modal.visible=Boolean(mode);
       hud.visible=true;
-      const timeRatio=game.remaining/config.timer.startSeconds,extraCapacity=config.timer.maxSeconds-config.timer.startSeconds;
-      const inOvertime=timeRatio>1;
-      timer.scale.x=Math.max(.001,Math.min(1,timeRatio));timer.material=materials[game.effects.hourglass>0?'mint':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
-      overtime.visible=inOvertime&&extraCapacity>0;
-      overtime.scale.x=Math.max(.001,Math.min(1,(game.remaining-config.timer.startSeconds)/Math.max(.001,extraCapacity)));
-      const timeLabel=inOvertime?`OVERTIME / ${Math.ceil(timeRatio*100)}%`:'TIME';
-      slot('timeLabel',hud,timeLabel,g=>text(g,timeLabel,24,67,{size:6.2,material:'muted',spacing:.6}));
-      slot('clock',hud,Math.ceil(game.remaining),g=>text(g,`${Math.ceil(game.remaining)}s`,338,65,{size:10,align:'right',raised:true}));
-      slot('score',hud,`${game.score}:${view.best}`,g=>{text(g,String(game.score).padStart(2,'0'),244,39,{size:17,align:'right'});text(g,String(view.best).padStart(2,'0'),291,39,{size:17,align:'right'});});
+      lastBest=view.best;syncMeters(game);
+      rewardLayer.visible=phase==='running'&&!mode;
       pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
       slot('sound',sound.root,view.soundOn,g=>{icon(g,view.soundOn?'sound':'silent',19,17,{scale:.65,material:'ink',z:6});text(g,view.soundOn?'Sound on':'Sound off',40,12,{size:8,material:'ink',z:6});});
       sound.label=`Turn sound ${view.soundOn?'off':'on'}`;
@@ -289,13 +348,25 @@ export function createUI(font, config) {
     focusNext(current,direction=1){const list=enabledControls();if(!list.length)return '';const at=list.findIndex(c=>c.id===current);return list[at<0?(direction>0?0:list.length-1):(at+direction+list.length)%list.length].id;},
     collectionPages(){return collectionPages;},
     press(action,now){lastPress=action;pressUntil=now+120;},
-    animate(now){for(const c of controls)if(c.id===lastPress&&now<pressUntil){c.root.position.z-=1.5;c.root.position.y-=1.5;};},
+    celebrate,
+    reset(){for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();recharge.visible=false;},
+    animate(now,dt,game){
+      const activeDt=game.phase==='running'?dt:0;
+      meters.advance(activeDt);
+      for(let i=celebrations.length-1;i>=0;i--){
+        const item=celebrations[i];item.age+=activeDt;
+        if(item.age>=config.celebration.durationSeconds){removeCelebration(item);celebrations.splice(i,1);}else animateCelebration(item);
+      }
+      syncMeters(game);
+      for(const c of controls)if(c.id===lastPress&&now<pressUntil){c.root.position.z-=1.5;c.root.position.y-=1.5;}
+    },
     description(game,view){
       if(mode==='paused')return 'Paused. A little breather. Your letters are right where you left them. The clock can wait.';
       if(mode==='over')return `Time to exhale. ${game.score} points from ${game.wordCount} words. Best ${view.best}.`;
       if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
-      return `${phase==='ready'?'clttr. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}. ${view.feedback}`}`;
+      const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
+      return `${phase==='ready'?'clttr. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
     },
   };
 }

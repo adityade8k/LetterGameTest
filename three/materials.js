@@ -11,6 +11,7 @@ export function celMaterial(tones,{specularStrength=0,shininess=56}={}) {
       lightDirection: { value: new THREE.Vector3(...DESIGN.cel.light).normalize() },
       threshold: { value: DESIGN.cel.threshold },
       specularStrength: { value: specularStrength }, shininess: { value: shininess },
+      opacity: { value: 1 },
     },
     vertexShader: `varying vec3 vNormal;
       void main() {
@@ -18,7 +19,7 @@ export function celMaterial(tones,{specularStrength=0,shininess=56}={}) {
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }`,
     fragmentShader: `uniform vec3 lightTone, shadeTone, lightDirection;
-      uniform float threshold,specularStrength,shininess;
+      uniform float threshold,specularStrength,shininess,opacity;
       varying vec3 vNormal;
       void main() {
         vec3 normal=normalize(vNormal);
@@ -28,7 +29,7 @@ export function celMaterial(tones,{specularStrength=0,shininess=56}={}) {
         vec3 viewDirection=vec3(0.,0.,1.);
         vec3 halfVector=normalize(lightDirection+viewDirection);
         float highlight=pow(max(0.,dot(normal,halfVector)),shininess)*specularStrength*step(0.,illumination);
-        gl_FragColor = vec4(mix(mix(shadeTone,lightTone,band),vec3(1.,.96,.85),highlight),1.0);
+        gl_FragColor = vec4(mix(mix(shadeTone,lightTone,band),vec3(1.,.96,.85),highlight),opacity);
         #include <colorspace_fragment>
       }`,
   });

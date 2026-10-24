@@ -1,7 +1,8 @@
 import { DESIGN } from './design.js';
 import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
-import { PrefixLetterSupply } from './letter-supply.mjs';
+import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
+import { spawnPosition } from './spawn.mjs';
 
 // Only the WebGL canvas is attached to the page. The interface and its hit
 // targets live in ui.js; the original dictionary and game rules stay shared.
@@ -9,13 +10,12 @@ if(document.readyState==='loading')await new Promise(resolve=>document.addEventL
 const game=new Letterfall.WordGame(LETTERFALL_WORDS);
 const config=game.config,motion=LetterfallMotion;
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
+const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const width=DESIGN.width,height=DESIGN.fieldHeight,size=config.tiles.mobileSize;
 const tileShape={pitchOffset:DESIGN.tile.tiltX,yawOffset:DESIGN.tile.tiltY,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
-const weightedLetters='EEEEEEEEEEEEAAAAAAAAAIIIIIIIIIOOOOOOOOTTTTTTTNNNNNNRRRRRRSSSSSSLLLLDDDDUUUUCCMMFFGGPPWWYYBHVKJXQZ';
-const wordSeeds='CAT DOG SUN RED TOP SEA RUN MAP PEN CUP HAT BED BOX SKY ART TEA FOX JAM KEY ZIP NET WEB AIR GEM ICE JET OAK VAN WAX YES ZOO RAIN MOON STAR TREE FISH BIRD BOOK HOME LOVE PLAY SAND WAVE WIND FIRE SNOW GOLD BLUE MINT GLOW PEAR PLUM LIME RICE BEAN CAKE PINK SONG WORD CATCH LIGHT SMILE DREAM CLOUD GREEN'.split(' ');
 const storageKey='letterfall.best.points.v2';
-let scene,tiles=[],bag=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
+let scene,tiles=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
 let soundOn=false,audioContext,best=0,roundBest=0,resumeAfterMenu=false;
 const view={mode:'',collectionPage:0,feedback:'',feedbackKind:'',focus:'',hover:'',best:0,roundBest:0,soundOn:false};
 try{const saved=Number(localStorage.getItem(storageKey));if(Number.isSafeInteger(saved)&&saved>=0)best=saved;}catch{/* Storage is optional. */}
@@ -43,29 +43,17 @@ function makeTile(letter, x, y) {
     tilt:motion.radians((Math.random()*2-1)*config.rotation.maxInitialAngleDegrees), rotationSpeed:motion.rotationSpeed(config.rotation) },config);
 }
 function seed() {
-  const opening = LetterfallOpening.lettersFor(game.dictionary,config.opening.mobileTiles,weightedLetters);
+  const opening = LetterfallOpening.lettersFor(game.dictionary,config.opening.mobileTiles,()=>frequencySupply.next());
   const positions = LetterfallOpening.scatter(opening.letters.length,width,height,size,config.opening);
   tiles = opening.letters.map((letter,i) => makeTile(letter,positions[i].x,positions[i].y));
   settleTiles(tiles,width,size,config.physics);
 }
-function nextRandomLetter() {
-  if (Math.random()<.22) return weightedLetters[Math.floor(Math.random()*weightedLetters.length)];
-  if (!bag.length) {
-    bag = wordSeeds[Math.floor(Math.random()*wordSeeds.length)].split('');
-    for (let i=bag.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1)); [bag[i],bag[j]]=[bag[j],bag[i]]; }
-  }
-  return bag.pop();
-}
 function nextLetter() {
-  return letterSupply.next(game.current,game.used,nextRandomLetter);
+  return letterSupply.next(game.current,game.used,()=>frequencySupply.next());
 }
 function spawn() {
-  const count = Math.max(4,Math.floor(width/(size+config.tiles.gapPixels))), available=[];
-  for(let column=0;column<count;column++) {
-    const x=(column+.5)*width/count;
-    if(!tiles.some(tile=>Math.abs(tile.x-x)<size && tile.y<size*1.7)) available.push(x);
-  }
-  if(available.length) tiles.push(makeTile(nextLetter(),available[Math.floor(Math.random()*available.length)],-size));
+  const position=spawnPosition(tiles,width,size,config);
+  if(position)tiles.push(makeTile(nextLetter(),position.x,position.y));
 }
 function offerHourglass() {
   tiles=tiles.filter(tile=>tile.kind!=='hourglass');
@@ -76,8 +64,8 @@ function handle(result){
   if(result.type==='word'){
     if(result.hourglassOffered)offerHourglass();
     if(game.score>best){best=game.score;try{localStorage.setItem(storageKey,String(best));}catch{}}
-    const reward=result.reward+.00001<result.requestedReward?'clock topped up':`+${format(result.reward)}s`;
-    feedback(`${result.word} / +${result.points} pts / ${reward}${result.bonusReward>0?' / gold bonus':''}${result.hourglassOffered?' / hourglass incoming':''}`,'good');tone('word');
+    view.feedback='';view.feedbackKind='';feedbackUntil=0;
+    scene.ui.celebrate(result,game);tone('word');
   }else if(result.type==='penalty'){
     const reason={repeat:'Already collected',clear:'Word cleared',spelling:'No word starts that way',incomplete:'Not a complete word'}[result.reason];
     feedback(`${reason} / -${format(result.penalty)}s`,'bad');tone('penalty');
@@ -114,7 +102,7 @@ function updateLabel(){
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
-  roundBest=best;game.start(performance.now());scene.reset();bag=[];spawnClock=0;hover=null;seed();
+  roundBest=best;game.start(performance.now());scene.reset();spawnClock=0;hover=null;seed();
   Object.assign(view,{mode:'',focus:'',hover:'',collectionPage:0,feedback:'',feedbackKind:''});feedbackUntil=0;resumeAfterMenu=false;
   sync();updateLabel();scene.canvas.focus({preventScroll:true});
 }
@@ -205,8 +193,7 @@ try{
     const dt=Math.min((now-previous)/1000,.05);previous=now;handle(game.advance(now));
     if(game.phase==='running'){
       const worldDt=dt*game.timeScale;
-      const speed=Math.min(config.falling.minPixelsPerSecond+game.wordCount*config.falling.increasePerWord,config.falling.maxPixelsPerSecond);
-      stepTiles(tiles,worldDt,{width,size,speed,config,reducedMotion});
+      stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
       tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
       spawnClock+=worldDt;if(spawnClock>=config.falling.mobileSpawnSeconds){spawnClock=0;spawn();}
