@@ -1,6 +1,7 @@
 import { DESIGN } from './design.js';
 import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
+import { DifficultyCurve } from './difficulty.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
 import { spawnPosition, fieldPosition, openingFeed, streamLimit, DeferredRefills } from './spawn.mjs';
 import { exposedPosition, letterTarget } from './layout.mjs';
@@ -12,6 +13,7 @@ import { createAudio } from './audio.mjs';
 if(document.readyState==='loading')await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
 const game=new Letterfall.WordGame(LETTERFALL_WORDS);
 const config=game.config,motion=LetterfallMotion;
+const difficulty=new DifficultyCurve(config.difficulty);
 const refills=new DeferredRefills();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
@@ -186,7 +188,7 @@ function updateLabel(){
 }
 function begin(){
   if(roundId&&game.phase!=='over')finishRound(true);
-  roundBest=best;game.start(performance.now());scene.reset();refills.reset();spawnClock=0;hover=null;updateLayout();seed();
+  roundBest=best;game.start(performance.now());difficulty.reset();scene.reset();refills.reset();spawnClock=0;hover=null;updateLayout();seed();
   roundId=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
   activeOffset=view.book.stats?.activeSeconds||0;bestChain=0;lastCheckpoint=0;lastLowWarning=-Infinity;
   progress.beginRound(roundId);refreshBook();
@@ -325,7 +327,7 @@ try{
       if(game.elapsed-lastCheckpoint>=10)checkpoint();
       if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){audio.play('lowtime');lastLowWarning=game.elapsed;}
       const worldDt=dt*game.timeScale;
-      stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion});
+      stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
       tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
       spawnClock+=worldDt;if(spawnClock>=config.falling.mobileSpawnSeconds){spawnClock%=config.falling.mobileSpawnSeconds;spawn();}

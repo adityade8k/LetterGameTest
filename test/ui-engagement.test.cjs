@@ -167,3 +167,11 @@ test('help explains the facing-side pickup and no longer teaches grenade letters
   assert.match(description,/Letter tiles never release smoke/);
   assert.doesNotMatch(description,/Grenade letters release/);
 });
+
+
+test('help describes the opening difficulty ramp and respects a disabled curve',supported,async()=>{
+  const normal=await create();normal.view.mode='help';normal.sync();
+  assert.match(normal.ui.description(normal.game,normal.view),/ramps up over 45 active seconds.*rises and falls randomly/);
+  const easy=await create({difficulty:{enabled:false}});easy.view.mode='help';easy.sync();
+  assert.match(easy.ui.description(easy.game,easy.view),/Letter Z spin stays at zero/);
+});

@@ -144,6 +144,13 @@
     "restMinSeconds": 0.8,
     "restMaxSeconds": 2.4
   },
+  "difficulty": {
+    "enabled": true,
+    "rampSeconds": 45,
+    "minTransitionSeconds": 8,
+    "maxTransitionSeconds": 16,
+    "levelSteps": 4
+  },
   "physics": {
     "collisionGap": 2,
     "restitution": 0.08,
@@ -273,6 +280,10 @@
       if (config.rotation[key] > 1) throw new Error(`config.js: rotation.${key} must be between 0 and 1.`);
     }
     if (config.rotation.restMaxSeconds < config.rotation.restMinSeconds) throw new Error('config.js: rotation.restMaxSeconds must be at least restMinSeconds.');
+    if (typeof config.difficulty.enabled !== 'boolean') throw new Error('config.js: difficulty.enabled must be true or false.');
+    for (const key of ['rampSeconds', 'minTransitionSeconds', 'maxTransitionSeconds']) number('difficulty', key, 0, true);
+    if (config.difficulty.maxTransitionSeconds < config.difficulty.minTransitionSeconds) throw new Error('config.js: difficulty.maxTransitionSeconds must be at least minTransitionSeconds.');
+    if (!Number.isInteger(config.difficulty.levelSteps) || config.difficulty.levelSteps < 1 || config.difficulty.levelSteps > 20) throw new Error('config.js: difficulty.levelSteps must be an integer from 1 to 20.');
     for (const key of Object.keys(defaults.physics)) number('physics', key);
     if (config.physics.restitution > 1) throw new Error('config.js: physics.restitution must be at most 1.');
     if (!Number.isInteger(config.physics.solverIterations) || config.physics.solverIterations < 1 || config.physics.solverIterations > 64) throw new Error('config.js: physics.solverIterations must be an integer from 1 to 64.');

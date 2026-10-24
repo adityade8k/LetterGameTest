@@ -20,7 +20,7 @@ test('long crowded simulations keep rotated squares apart and inside side walls'
  let worst=0;
  for(let frame=0;frame<1800;frame++){
   if(frame%26===0){const column=frame%5;const x=36+column*70;if(!tiles.some(t=>Math.abs(t.x-x)<55&&t.y<90)){const t=tile(p,c,x,-50,'Z',0,random);t.kind='hourglass';tiles.push(t);}}
-  p.stepTiles(tiles,1/30,{width:360,size:47,speed:50,config:c,random});tiles=tiles.filter(t=>t.y<410);
+  p.stepTiles(tiles,1/30,{width:360,size:47,speed:50,config:c,random,difficultyLevel:(1+Math.sin(frame/90))/2});tiles=tiles.filter(t=>t.y<410);
   for(let i=0;i<tiles.length;i++){
    const t=tiles[i],half=p.projectedHalfSize(t,47,c.physics.collisionGap);
    const edge=half.x*Math.abs(Math.cos(t.tilt))+half.y*Math.abs(Math.sin(t.tilt))+c.physics.wallPadding;
@@ -49,7 +49,7 @@ test('high-value turn frequency and speed limits are configurable',async()=>{
  const a=tile(p,c,80,100,'A',0,random),q=tile(p,c,260,100,'Q',0,random);
  assert.equal(a.spins,false);assert.equal(q.spins,true);assert.equal(q.turnAxis,'y');assert.equal(a.turnAxis,'z');assert.ok(Math.abs(q.rotationSpeed)>=15*Math.PI/180&&Math.abs(q.rotationSpeed)<=20*Math.PI/180);
  p.stepTiles([a,q],6,{width:360,size:47,speed:29,config:c,random});
- assert.ok(Math.abs(q.yaw)>.7);assert.ok(Math.abs(q.pitch)>.1&&Math.abs(q.tilt)>.1);assert.ok(Math.abs(q.yaw)>Math.abs(q.pitch));assert.equal(a.yaw,0);assert.ok(Math.abs(a.tilt)<.25);
+ assert.ok(Math.abs(q.yaw)>.7);assert.ok(Math.abs(q.pitch)>.1);assert.equal(q.tilt,0);assert.ok(Math.abs(q.yaw)>Math.abs(q.pitch));assert.equal(a.yaw,0);assert.ok(Math.abs(a.tilt)<.25);
 });
 test('invalid physical tuning and turn probabilities are rejected',()=>{
  assert.throws(()=>createConfig({physics:{restitution:2}}));
@@ -81,12 +81,13 @@ test('glyph fitting keeps narrow, wide and multi-character labels inside their z
 });
 
 
-test('multi-axis turns preserve the combined speed and the single-axis option',async()=>{
+test('XY turns preserve their axis mix while Z follows difficulty independently',async()=>{
  const p=await physics,c=createConfig({rotation:{ordinarySpinChance:1,highValueSpinChance:1,minDegreesPerSecond:20,maxDegreesPerSecond:20,restMinSeconds:0,restMaxSeconds:0}});
  for(const letter of ['A','Q']){
-  const t=tile(p,c,180,100,letter);p.stepTiles([t],1,{width:360,size:47,speed:0,config:c});
+  const t=tile(p,c,180,100,letter);p.stepTiles([t],1,{width:360,size:47,speed:0,config:c,difficultyLevel:1});
   assert.ok([t.pitch,t.yaw,t.tilt].every(angle=>Math.abs(angle)>.001));
-  assert.ok(Math.abs(Math.hypot(t.pitch,t.yaw,t.tilt)-20*Math.PI/180)<1e-8);
+  assert.ok(Math.abs(Math.hypot(t.pitch,t.yaw)-20*Math.PI/180*Math.hypot(t.turnAxes.x,t.turnAxes.y))<1e-8);
+  assert.ok(Math.abs(Math.abs(t.tilt)-20*Math.PI/180)<1e-8);
  }
  const single=createConfig({rotation:{highValueSpinChance:1,secondaryAxisWeight:0,restMinSeconds:0,restMaxSeconds:0}}),q=tile(p,single,180,100,'Q');
  p.stepTiles([q],2,{width:360,size:47,speed:0,config:single});assert.notEqual(q.yaw,0);assert.equal(q.pitch,0);assert.equal(q.tilt,0);

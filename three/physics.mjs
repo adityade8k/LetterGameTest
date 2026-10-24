@@ -20,6 +20,9 @@ export function prepareTile(tile,config,random=Math.random){
   // High-value tiles use the upper half of the same user-controlled speed range.
   const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
   tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
+  // Keep a stable direction and personal speed for Z; difficulty changes only
+  // the speed factor, never the angle or direction abruptly.
+  tile.zRotationSpeed=tile.rotationSpeed;
   tile.rest=randomRange(rotation.restMinSeconds,rotation.restMaxSeconds,random);
   tile.turnLeft=radians(randomRange(150,240,random));
   const secondary=()=>rotation.secondaryAxisWeight*randomRange(.65,1,random)*(random()<.5?-1:1);
@@ -28,7 +31,7 @@ export function prepareTile(tile,config,random=Math.random){
   for(const axis of ['x','y','z'])tile.turnAxes[axis]/=length;
   return tile;
 }
-function rotate(tile,dt,config,reducedMotion,random){
+function rotate(tile,dt,config,reducedMotion,random,difficultyLevel){
   if(dt<=0)return;
   if(tile.kind==='hourglass'){
     tile.age+=dt;tile.yaw=(tile.yaw+tile.rotationSpeed*dt)%(Math.PI*2);
@@ -37,17 +40,15 @@ function rotate(tile,dt,config,reducedMotion,random){
   if(reducedMotion&&config.rotation.respectReducedMotion)return;
   if(!config.rotation.maxDegreesPerSecond)return;
   tile.age+=dt;
-  if(!tile.spins){
-    const amplitude=Math.min(config.rotation.rockDegrees,config.rotation.maxDegreesPerSecond/1.4);
-    tile.tilt=tile.baseTilt+radians(amplitude)*(Math.sin(tile.age*.49+tile.rockPhase)-Math.sin(tile.rockPhase));
-    return;
-  }
+  // All letters follow the same round intensity, with their own bounded
+  // speed. At zero, retain the current angle: no rocking or snap to upright.
+  tile.tilt=(tile.tilt+tile.zRotationSpeed*difficultyLevel*dt)%(Math.PI*2);
+  if(!tile.spins)return;
   if(tile.rest>0){tile.rest=Math.max(0,tile.rest-dt);return;}
   const amount=Math.min(tile.turnLeft,Math.abs(tile.rotationSpeed)*dt);
   const signedAmount=Math.sign(tile.rotationSpeed)*amount;
   tile.pitch=(tile.pitch+tile.turnAxes.x*signedAmount)%(Math.PI*2);
   tile.yaw=(tile.yaw+tile.turnAxes.y*signedAmount)%(Math.PI*2);
-  tile.tilt=(tile.tilt+tile.turnAxes.z*signedAmount)%(Math.PI*2);
   tile.turnLeft-=amount;
   if(tile.turnLeft<=1e-9){
     tile.rest=randomRange(config.rotation.restMinSeconds,config.rotation.restMaxSeconds,random);
@@ -102,8 +103,9 @@ export function settleTiles(tiles,width,size,settings){
     if(largest<.005)break;
   }
 }
-export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,random=Math.random}){
+export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,random=Math.random,difficultyLevel=0}){
   if(dt<=0)return;
+  const level=Number.isFinite(difficultyLevel)?Math.max(0,Math.min(1,difficultyLevel)):0;
   const steps=Math.max(1,Math.ceil(dt*120)),step=dt/steps,settings=config.physics;
   for(let n=0;n<steps;n++){
     for(const tile of tiles){
@@ -112,7 +114,7 @@ export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,
       tile.vy+=(target-tile.vy)*(1-Math.exp(-settings.fallRecovery*step));
       tile.vx*=Math.exp(-settings.lateralDamping*step);
       tile.x+=tile.vx*step;tile.y+=tile.vy*step;
-      rotate(tile,step,config,reducedMotion,random);
+      rotate(tile,step,config,reducedMotion,random,level);
     }
     settleTiles(tiles,width,size,settings);
   }
