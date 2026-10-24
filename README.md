@@ -1,6 +1,6 @@
-# clttr
+# CLTTR
 
-A 9:16 mobile word game rendered entirely in **Three.js 0.186.1**. Falling tiles, raised letters, icons, the timer, scores, buttons, the word tray, word collection, feedback, and every menu are Three.js meshes. One WebGL canvas draws the game. There are no HTML overlays, DOM buttons, HTML-to-texture captures, or CSS2D/CSS3D renderers.
+A mobile word game rendered entirely in **Three.js 0.186.1**. Falling tiles, raised letters, icons, the timer, scores, buttons, the word tray, word collection, feedback, and every menu are Three.js meshes. One WebGL canvas draws the game. There are no HTML overlays, DOM buttons, HTML-to-texture captures, or CSS2D/CSS3D renderers.
 
 ## Play locally
 
@@ -10,7 +10,7 @@ npm start
 
 Open **http://localhost:5173**. To use the current preview port, run `PORT=5188 npm start` and open **http://localhost:5188**. Use the local server, rather than opening the HTML file directly: ES modules and the bundled font load over HTTP. The server listens only on this computer. No install, API key, or internet connection is needed to play; Three.js, fonts, and the dictionary are bundled locally.
 
-The canvas always keeps a 9:16 aspect ratio. Its logical space is 360 × 640, with a 337-unit falling field. It uses the mobile tile-count, size, and supply settings on desktop too, so the same portrait game scales consistently across screens.
+The game uses a fixed **portrait 9:16 frame**, sized to fit the available phone screen and centered on desktop. The same 360 × 640 logical world, tile sizes, and choice density apply on every display. Device safe areas remain outside the frame. The falling field fills the whole canvas behind the Three.js interface; the header stays at the top and the word tray at the bottom. Tiles covered by panels cannot intercept taps or keyboard selections.
 
 ## Controls
 
@@ -18,7 +18,7 @@ The canvas always keeps a 9:16 aspect ratio. Its logical space is 360 × 640, wi
 - Tap Undo to clear the whole word for a two-second penalty.
 - Tap Pause to stop the clock, effects, and letters. Switching away from the page also pauses automatically.
 - Tap the collected-word strip to open its paginated collection. The round pauses while this panel is open and resumes when it closes.
-- Letter keys pick the lowest fully visible matching letter. **Enter** submits, **Backspace** clears, **1** collects a visible hourglass, and **Escape** pauses/resumes or closes help/collection.
+- Letter keys pick the lowest fully visible matching letter. **? / \*** picks a visible blank. **Enter** submits, **Backspace** clears, **1** collects a visible hourglass, and **Escape** pauses/resumes or closes help/collection.
 - **Tab / Shift+Tab** cycle the available Three.js controls. A small gold marker shows focus. **Enter / Space** activate the focused control. Enter also starts the ready screen. With no control focused, Space pauses a running round.
 - Sound starts off. The sound control is in the main menu, beside How to play. It is absent during a round.
 
@@ -28,6 +28,7 @@ The single canvas has a descriptive accessibility label reflecting the current w
 
 - Start with **60 seconds** and bank earned time up to **120 seconds (200%)**. Above 60 seconds, the timer shows an overtime percentage and a gold second fill. The clock drains normally back through the standard fill.
 - Make new English words of **3 or more letters**. Each word earns the sum of its standard English **Scrabble letter points**; these values appear on the tiles.
+- **Blank wildcards** represent any one letter and earn **zero points**. There is no letter picker: a selected blank appears as `?`, and submission resolves the whole pattern to an unused dictionary word. Blanks work at any position, and several can occur in one word. All interpretations remain available as more letters are added. If several unused words match, common English letters at the blank positions are favored; the actual word is added to the collection. If every complete match was already used, the normal repeat penalty applies. An impossible pattern still fails immediately. Time rewards and collection scores use only the points actually earned, including any normal gold-letter time bonus.
 - **Three-letter words:** 0.1 seconds per point, capped at **0.5 seconds** of ordinary time. **Four letters:** 0.25 seconds per point, capped at **2 seconds**. **Five or more letters:** **1.5 seconds per point**. Gold time is added after the short-word cap.
 - A repeated submission costs **2 seconds**. An impossible prefix or an incomplete submitted word costs **5 seconds**. Both clear the current word without reducing earned points. A used word may still be extended before submitting: CAT can become CATCH.
 - Undo clears the whole word for **2 seconds**. Empty undo does nothing. Selected tiles stay consumed.
@@ -36,12 +37,12 @@ The single canvas has a descriptive accessibility label reflecting the current w
 
 ## Opening and special tiles
 
-Each round starts with randomly scattered letters supporting a **7-, 6-, 5-, and 3-letter word**, including the needed repeated letters. These choices can share tiles. The opening now has **16 tiles**, scattered through most of the field. Its nine filler letters use English text frequencies. Later letters use the same frequency distribution, with optional continuation help beginning at four selected letters.
+Each round starts with randomly scattered letters supporting a **7-, 6-, 5-, and 3-letter word**, including the needed repeated letters. These choices can share tiles. The opening scales with available space, starting from a target of **20 exposed choices**. Guaranteed word letters are placed first, followed by **one blank** and filler drawn from English text frequencies. Later spawns have a **5% blank chance**; ordinary letters use the same frequency distribution, with optional continuation help beginning at four selections. Blanks are plain cream tiles with a zero in the point corner, on both faces; they do not carry gold multipliers or grenades.
 
 - **Gold:** about 16% of letters carry a ×2 time multiplier. Each adds an extra contribution for that letter after the normal reward cap, with unchanged points. CAT with a gold C earns **0.8 seconds** rather than 0.5. QUIZ with a gold Q earns **4.5 seconds** rather than 2. CATCH with a gold C earns **22.5 seconds** rather than 18. Multiple gold letters add their contributions; they do not multiply the whole word.
 - **Special-tile warm-up:** the first **20 active seconds** have no grenade-marked letters or hourglass drops. Pausing does not advance this warm-up; restarting resets it. Gold multiplier tiles are available from the opening. After warm-up, the usual chances apply to newly spawned grenade letters and qualifying word submissions.
 - **Hourglass:** after warm-up, each new word of at least five letters has a one-in-three chance to drop one from a random position above the field. It falls at 1.8× ordinary speed. Catch it to slow the countdown, falling letters, rotation, and supply to 40% speed for **five active real seconds**. At most one uncollected hourglass is retained. A new drop replaces it; a missed drop disappears without penalty.
-- **Grenade-marked letters:** about 9% carry a small grenade and fall at 1.8× speed. Using one includes its letter normally and releases **five seconds of pink smoke** in four freshly scattered, independently shaped clouds. The smoke blooms in over 0.5 seconds, holds opaque centers, drifts gently, then fades out over its final second. A marked letter may also be gold. Smoke also triggers on a bad prefix unless that penalty ends the round.
+- **Grenade-marked letters:** about 9% carry a small grenade and fall at 1.8× speed. Using one includes its letter normally and releases **five seconds of pink smoke** in four freshly scattered, independently shaped clouds. Clouds move in from both sides over 1.1 seconds while fading in over 0.8 seconds, hold opaque centers with gentle drift, then move and fade back out toward the sides over the final 1.2 seconds. Centers, entry/exit heights, shapes, and timing vary on every activation. A marked letter may also be gold. Smoke also triggers on a bad prefix unless that penalty ends the round.
 - Smoke obscures the falling field while the timer and word tray remain readable. Remembered tiles remain clickable through smoke.
 - Recollecting an effect refreshes its duration without stacking strength. Both effects can run together. Their durations use unscaled active time. Pause freezes them; game over and restart clear them.
 
@@ -49,7 +50,9 @@ Each round starts with randomly scattered letters supporting a **7-, 6-, 5-, and
 
 The Three.js game keeps a **constant 31.32 logical pixels/second** falling pace and the existing rotation behavior. Neither elapsed time nor collected-word count makes it harder. The former difficulty wave is removed. The hourglass still temporarily slows motion and the clock as before.
 
-The opening has **16 tiles**. New letters get a spawn opportunity every **0.35 seconds**, up to **26 active letters** including incoming/outgoing tiles. Hourglasses do not count against this cap. New tiles enter whichever top positions have diagonal clearance, replacing the oversized empty corridor that kept the field sparse. Soft collisions still keep them apart. The fully visible population varies with catches, marked tiles, and available room; it is not a fixed 26 visible letters.
+Replenishment stays **one pick behind**: the first selection leaves a gap, and the second and later selections can each release one replacement into a random open space. The latest tap area remains protected until another tile is selected, and all recent tap areas have a **0.45-second cooldown**. Older cleared spaces are fallback candidates if other gaps are crowded; nothing is forced beneath the latest tap. A quiet **0.14-second fade** introduces each replacement. If there is no safe space yet, the replacement waits for one.
+
+Every **0.35 seconds**, supply also restores choices that have moved behind a panel or off screen and offers a normal drop from the top. This maintenance respects the same held-back selection and protected areas. The target is **20 exposed letters** before the first pick, then approximately 19 while replenishing one pick behind. Replacements use the current spelling's letter probabilities. Top drops have a separate population budget; hourglasses are excluded. Available space and soft collisions determine the actual population, so tiles are never stacked just to reach a count.
 
 Unassisted spawns use normalized English text frequencies from [Peter Norvig’s Google Books analysis](https://www.norvig.com/mayzner.html): common letters such as E, T, A, O, I, and N appear more often; rare letters remain possible. This replaces both the short-word bag and the old letter string. There is no forced word completion. `letterFrequency` in `config.js` contains all 26 editable weights. They affect supply only, not Scrabble scores.
 
@@ -67,7 +70,7 @@ Animations freeze while paused and clear on restart/game over. Consecutive rewar
 
 Once **four letters are selected**, newly spawned letters have a **35% chance** to come from unused longer dictionary words beginning with the **entire current spelling**. The next letter receives full weight; the letter after it receives 40% weight. Each matching word contributes, so continuations shared by several words appear more often. The other 65% of spawns use the English-frequency sampler.
 
-The candidates update as more letters are selected. Help stops when the word is submitted, cleared, misspelled, or has no unused longer continuation. It depends on selected letters, not collected-word count. Existing falling tiles and spawn timing do not change, and no word-validity hint is shown. The opening's existing word guarantees are preserved.
+The candidates update as more letters are selected, including every viable interpretation of a wildcard. Help stops when the word is submitted, cleared, misspelled, or has no unused longer continuation. It depends on selected letters, not collected-word count. Existing falling tiles do not change, and no word-validity hint is shown. The opening's existing word guarantees are preserved.
 
 Tune `wordAssist` in `config.js`: `enabled` toggles the experiment, `chance` controls its strength, `minPrefixLength` sets the trigger, `lookAhead` sets how many following positions contribute, and `nextLetterDecay` controls the weight of later positions. Set `enabled: false` or `chance: 0` to restore the original supply throughout the round.
 
@@ -81,8 +84,9 @@ Edit **`config.js`**, save, and refresh. Its comments explain the settings, unit
 | `rules` | Minimum word length |
 | `rewards` | Seconds per point, word-length rates, short-word base caps |
 | `penalties` | Clear, repeat, and misspelling penalties |
-| `opening.mobileTiles`, `opening.maxHeightFraction` | Opening count and scatter depth |
-| `falling` | Constant `pixelsPerSecond`, `letterLimit`, and `mobileSpawnSeconds`; legacy p5 curve settings remain separate |
+| `opening.mobileTiles` | Minimum opening population; the full-field target can increase it |
+| `wildcards` | Blank probability and guaranteed opening blank count |
+| `falling` | Constant speed, minimum top-drop budget, visible-choice target and maximum, replacement fade, recent-tap cooldown, spawn interval; legacy p5 curve settings remain separate |
 | `letterFrequency` | Relative English letter frequencies for ordinary spawns and opening filler |
 | `celebration` | Reward-label duration, timer refill and score-count duration |
 | `wordAssist` | Extension-help toggle, trigger length, probability, lookahead, later-letter weight |
@@ -91,7 +95,7 @@ Edit **`config.js`**, save, and refresh. Its comments explain the settings, unit
 | `specialTiles.warmupSeconds` | Active-play delay before grenade letters and earned hourglasses unlock |
 | `bonusLetters` | Gold chance and time multiplier |
 | `hourglass` | Minimum word length, drop chance, falling multiplier, duration, slow-time scale |
-| `smoke` | Grenade-letter chance, falling multiplier, duration, patch count, radius, opacity, fade-in/out timing, drift speed |
+| `smoke` | Grenade-letter chance, falling multiplier, duration, patch count, radius, opacity, fade-in/out and side-entry/exit timing, drift speed |
 | `tiles.mobileSize`, `tiles.gapPixels` | Tile size and supply spacing |
 | `letterPoints` | Per-letter score values |
 | `feedback.durationSeconds` | Feedback visibility duration |
@@ -109,14 +113,15 @@ The Three.js version uses projected oriented-box collision detection with a two-
 **`three/design.js`** controls the two-color material pairs, light direction, cel threshold, tile extrusion/bevel, raised-letter depth, camera layout, and maximum pixel ratio. Tiles have wider, three-segment bevels and a subtle satin highlight controlled by `tile.specularStrength` and `tile.shininess`; raised lettering stays in the two-tone diffuse material. The background now moves from light magenta through pink and peach into lemon yellow. `DESIGN.atmosphere.grainAmount` controls its subtle, static grain; `fogAmount` controls the mist. The older flat color/border settings in `config.js` apply only to the archived p5 version.
 
 - `three/materials.js`: hard two-tone cel shaders for objects; separate soft gradient, fog, and smoke shaders. No outlines; a small optional specular highlight is used on tile bodies.
-- `three/spawn.mjs`: constant-density supply cap and collision-safe entry positions.
+- `three/layout.mjs`: world bounds and panel placement within the portrait canvas, exposed-choice target.
+- `three/spawn.mjs`: collision-safe top entry, one-pick-delayed replenishment, protected tap areas, and open-gap placement.
 - `three/reward-motion.mjs`: animated score/time presentation without delaying actual rewards.
 - `three/letter-supply.mjs`: English-frequency sampling, cached dictionary-prefix lookup, and optional weighted continuation spawns.
 - `three/physics.mjs`: soft contact response and slower multi-axis turns with Y dominant on high-value tiles.
 - `three/tile-layout.mjs`: separate, scale-aware zones for the main glyph, time multiplier, grenade, and point value; each object is fitted from its actual mesh bounds.
 - `three/icons.js`: one consistent set of modeled arrows, Undo, pause, audio, hourglass, and grenade icons.
-- `three/scene.js`: actual extruded tile/letter geometry, modeled icons, shared geometry, particles, field clipping, raycasting, and WebGL rendering.
-- `three/ui.js`: mesh text, modeled controls, timer, menus, collection pagination, keyboard-focus marker, and UI raycasts. Text is extruded font geometry, not a bitmap or HTML texture. Beveled plinths, layered button caps, soft contact shadows, and a recessed timer give the interface depth. clttr sits at the top, the timer directly beneath it, then the falling field. The former top slogan and gameplay footer are removed.
+- `three/scene.js`: actual extruded tile/letter geometry, modeled icons, shared geometry, particles, full-field rendering, raycasting, and moving smoke.
+- `three/ui.js`: mesh text, modeled controls, timer, menus, collection pagination, keyboard-focus marker, and UI raycasts. Text is extruded font geometry, not a bitmap or HTML texture. Beveled plinths, layered button caps, soft contact shadows, and a recessed timer give the interface depth. CLTTR sits at the top, the timer directly beneath it, then the falling field. The former top slogan and gameplay footer are removed.
 - `three/app.js`: input and round presentation; it reuses the original pure rule engine.
 - `three/style.css`: only canvas sizing and page placement. No game graphics are styled with CSS.
 
@@ -137,6 +142,6 @@ The references were sampled with equal per-image weight after excluding edge UI.
 npm test
 ```
 
-The 82 automated tests cover the real dictionary, prefix failures, repeats, scores, reward caps, gold contributions, undo, restart, expiry, pause, config validation, rotation, opening guarantees, hourglass probability/duration, grenade triggers, smoke placement, rotated contacts, long crowded simulations, fast-tile tunneling, reduced motion, turn probabilities, combined multi-axis speed, projected 3D bounds, smooth smoke fades, separated face-label zones, the four-letter help threshold, weighted continuation probability, real-dictionary candidates, reset/exclusion behavior, the 200% overtime cap, and special-tile warm-up across pauses and restarts, English letter distribution, preserved continuation probability, dense non-overlapping supply, larger-opening word guarantees, smooth reward meters, consecutive rewards, and capped time gains.
+The 95 automated tests cover dictionary and wildcard resolution, unused-match preference, zero-point blank rewards, ambiguous-prefix continuation, repeats and penalties, time caps, gold, pause/restart, warm-up and special effects, side-entering smoke, English frequencies and word assistance, opening guarantees, portrait-world bounds, delayed replenishment across both picks and maintenance, protected tap areas, collision safety, rotation, and quiet reward animations.
 
-Browser validation checks portrait sizing, mesh button raycasts, keyboard focus, word submission, scoring, Undo, menus, collection, effect status, and the absence of HTML interface elements. A WebGL-capable modern browser is required.
+Browser validation checks the centered portrait frame on phone and desktop, mesh button raycasts, keyboard focus, wildcard submission and scoring, replenishment, Undo, menus, collection, moving smoke, and the absence of HTML interface elements. A WebGL-capable modern browser is required.

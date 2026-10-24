@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { WordGame } = require('../engine.js');
 const { createConfig } = require('../config.js');
-const { hourglassPosition, smokePatches, smokeEnvelope } = require('../effects.js');
+const { hourglassPosition, smokePatches, smokeEnvelope, smokePose } = require('../effects.js');
 const dictionary = require('../data/words.js');
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} differs from ${expected}`);
 const create = (options, random = () => 0) => { const game = new WordGame(dictionary, {specialTiles:{warmupSeconds:0}, ...options}, random); game.start(0); return game; };
@@ -279,12 +279,29 @@ test('invalid effect settings are rejected before a round starts', () => {
 
 test('pink smoke fades smoothly, holds an opaque center, and ends on time',()=>{
  const s=createConfig().smoke;
- near(smokeEnvelope(0,5,s),0);near(smokeEnvelope(.25,4.75,s),.5);
+ near(smokeEnvelope(0,5,s),0);near(smokeEnvelope(s.fadeInSeconds/2,5-s.fadeInSeconds/2,s),.5);
  near(smokeEnvelope(1,4,s),1);near(smokeEnvelope(3,2,s),1);
- near(smokeEnvelope(4.5,.5,s),.5);near(smokeEnvelope(5,0,s),0);
+ near(smokeEnvelope(5-s.fadeOutSeconds/2,s.fadeOutSeconds/2,s),.5);near(smokeEnvelope(5,0,s),0);
  near(smokeEnvelope(.1,4.9,s,.12),0);
  assert.throws(()=>createConfig({smoke:{fadeInSeconds:4,fadeOutSeconds:2}}));
  assert.throws(()=>createConfig({smoke:{driftPixelsPerSecond:-1}}));
+});
+
+test('smoke travels from both edges to random regions and exits to the sides',()=>{
+  const s=createConfig().smoke;
+  for(const [width,height] of [[360,780],[900,640]]){
+    const patches=smokePatches(width,height,s,()=>.35);
+    assert.deepEqual(new Set(patches.map(p=>p.side)),new Set([-1,1]));
+    for(const patch of patches){
+      const start=smokePose(patch,0,5,width,height,s),middle=smokePose(patch,2,3,width,height,s),end=smokePose(patch,5,0,width,height,s);
+      assert.ok(patch.side<0?start.x<0:start.x>width);assert.equal(start.opacity,0);
+      assert.ok(middle.x>0&&middle.x<width&&middle.y>0&&middle.y<height);assert.equal(middle.opacity,1);
+      assert.ok(patch.exitSide<0?end.x<0:end.x>width);assert.equal(end.opacity,0);
+      const reduced=smokePose(patch,2,3,width,height,s,true);
+      near(reduced.x,patch.x*width);near(reduced.y,patch.y*height);assert.equal(reduced.opacity,1);
+    }
+  }
+  assert.throws(()=>createConfig({smoke:{enterSeconds:4,exitSeconds:2}}),/smoke/);
 });
 
 

@@ -26,15 +26,17 @@ export class PrefixLetterSupply {
     if (prefix === this.cachedPrefix) return this.matches;
     // Jump directly to the prefix's range in the real dictionary. Avoid
     // rescanning 198,000 words on each spawn or storing a second full trie.
+    const stem=prefix.split('?')[0];
     let low = 0, high = this.words.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (this.words[middle] < prefix) low = middle + 1;
+      if (this.words[middle] < stem) low = middle + 1;
       else high = middle;
     }
     const matches = [];
-    for (let index = low; index < this.words.length && this.words[index].startsWith(prefix); index++) {
-      if (this.words[index].length > prefix.length) matches.push(this.words[index]);
+    for (let index = low; index < this.words.length && this.words[index].startsWith(stem); index++) {
+      const word=this.words[index];
+      if (word.length>prefix.length && [...prefix].every((letter,i)=>letter==='?'||letter===word[i])) matches.push(word);
     }
     this.cachedPrefix = prefix;
     this.matches = matches;

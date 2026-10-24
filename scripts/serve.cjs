@@ -19,4 +19,4 @@ const server = http.createServer((req, res) => {
   });
 });
 server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `Port ${port} is busy. Run with PORT=5174 npm start.` : error.message); process.exit(1); });
-server.listen(port, '127.0.0.1', () => console.log(`clttr is ready at http://localhost:${port}`));
+server.listen(port, '127.0.0.1', () => console.log(`CLTTR is ready at http://localhost:${port}`));

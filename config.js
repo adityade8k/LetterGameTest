@@ -14,6 +14,10 @@
       lowTimeSeconds: 15,
     },
     rules: { minWordLength: 3 },
+    wildcards: {
+      chance: 0.05,                // Blank tiles among new letters; resolve automatically on submit.
+      openingTiles: 1,             // Opening blanks replace filler; guaranteed words keep their letters.
+    },
     opening: {
       desktopTiles: 14,
       mobileTiles: 16,              // Each opening supports 7-, 6-, 5-, 3-letter words.
@@ -52,8 +56,10 @@
       patchCount: 4,
       radiusFraction: 0.27,         // Relative to the shorter playfield dimension.
       opacity: 1,
-      fadeInSeconds: 0.5,
-      fadeOutSeconds: 1,
+      fadeInSeconds: 0.8,
+      fadeOutSeconds: 1.2,
+      enterSeconds: 1.1,           // Clouds drift in from left/right, then return toward a side.
+      exitSeconds: 1.2,
       driftPixelsPerSecond: 4,      // Slow billowing, independent of the hourglass.
       color: '#e891b0',
     },
@@ -64,7 +70,11 @@
     },
     falling: {
       pixelsPerSecond: 31.32,      // Constant Three.js pace, unaffected by elapsed time or word count.
-      letterLimit: 26,             // Incoming/outgoing letters included; hourglass pickups excluded.
+      letterLimit: 26,             // Minimum budget for top drops; grows with viewport, excludes pickups.
+      visibleLetterTarget: 20,     // Exposed choices before a pick; newest pick stays unfilled.
+      maxVisibleLetters: 48,
+      replacementFadeSeconds: 0.14,// Quiet fade into an open gap after a later selection.
+      replacementCooldownSeconds: 0.45, // Keep recent tap areas clear, plus the newest pick until another pick.
       // Legacy p5 speed curve below; Three.js uses pixelsPerSecond above.
       minPixelsPerSecond: 31.32,
       maxPixelsPerSecond: 59.4,
@@ -146,6 +156,9 @@
     };
     for (const key of ['startSeconds', 'maxSeconds']) number('timer', key, 0, true);
     number('timer', 'lowTimeSeconds');
+    number('wildcards', 'chance');
+    if (config.wildcards.chance > 1) throw new Error('config.js: wildcards.chance must be at most 1.');
+    if (!Number.isInteger(config.wildcards.openingTiles) || config.wildcards.openingTiles < 0 || config.wildcards.openingTiles > 3) throw new Error('config.js: wildcards.openingTiles must be an integer from 0 to 3.');
     for (const key of Object.keys(defaults.rewards)) number('rewards', key);
     for (const key of ['desktopTiles', 'mobileTiles']) {
       if (!Number.isInteger(config.opening[key]) || config.opening[key] < 7) throw new Error(`config.js: opening.${key} must be an integer of at least 7.`);
@@ -167,6 +180,8 @@
     number('smoke', 'radiusFraction', 0, true);
     number('smoke', 'opacity', 0, true);
     for (const key of ['fadeInSeconds', 'fadeOutSeconds', 'driftPixelsPerSecond']) number('smoke', key);
+    for (const key of ['enterSeconds', 'exitSeconds']) number('smoke', key, 0, true);
+    if (config.smoke.enterSeconds + config.smoke.exitSeconds > config.smoke.durationSeconds) throw new Error('config.js: smoke entry and exit must fit within durationSeconds.');
     if (config.smoke.fadeInSeconds + config.smoke.fadeOutSeconds > config.smoke.durationSeconds) throw new Error('config.js: smoke fades must fit within durationSeconds.');
     if (config.bonusLetters.chance > 1) throw new Error('config.js: bonusLetters.chance must be between 0 and 1.');
     if (config.smoke.letterChance > 1) throw new Error('config.js: smoke.letterChance must be between 0 and 1.');
@@ -177,6 +192,12 @@
     for (const key of ['minPixelsPerSecond', 'maxPixelsPerSecond', 'increasePerWord']) number('falling', key);
     for (const key of ['desktopSpawnSeconds', 'mobileSpawnSeconds']) number('falling', key, 0, true);
     number('falling', 'pixelsPerSecond', 0, true);
+    number('falling', 'replacementFadeSeconds', 0, true);
+    number('falling', 'replacementCooldownSeconds', 0, true);
+    for (const key of ['visibleLetterTarget', 'maxVisibleLetters']) {
+      if (!Number.isInteger(config.falling[key]) || config.falling[key] < 8) throw new Error(`config.js: falling.${key} must be an integer of at least 8.`);
+    }
+    if (config.falling.maxVisibleLetters < config.falling.visibleLetterTarget) throw new Error('config.js: falling.maxVisibleLetters must be at least visibleLetterTarget.');
     if (!Number.isInteger(config.falling.letterLimit) || config.falling.letterLimit < config.opening.mobileTiles) throw new Error('config.js: falling.letterLimit must be an integer at least opening.mobileTiles.');
     for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') number('letterFrequency', letter);
     if (!Object.values(config.letterFrequency).some(weight => weight > 0)) throw new Error('config.js: letterFrequency needs at least one positive weight.');

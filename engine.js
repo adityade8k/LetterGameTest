@@ -24,9 +24,11 @@
       this.elapsed = 0;
       this.current = '';
       this.currentTiles = [];
+      this.currentPrefixes = [''];
       this.effects = { hourglass: 0, smoke: 0 };
       this.hourglassOffer = false;
       this.words = [];
+      this.wordScores = new Map();
       this.totalPoints = 0;
       this.used = new Set();
       this.lastTime = null;
@@ -43,6 +45,8 @@
       };
     }
     pointsFor(word) { return [...word.toUpperCase()].reduce((sum, letter) => sum + (this.config.letterPoints[letter] || 0), 0); }
+    collectedPoints(word) { return this.wordScores.get(word) ?? this.pointsFor(word); }
+    get pendingPoints() { return this.currentTiles.reduce((sum,tile)=>sum+(tile.blank?0:this.config.letterPoints[tile.letter]),0); }
     uncappedTimeForPoints(points, length) {
       const rewards = this.config.rewards;
       const base = points * rewards.secondsPerPoint;
@@ -58,15 +62,26 @@
     }
     rewardFor(word) { return this.timeForPoints(this.pointsFor(word), word.length); }
     get pendingReward() {
-      const bonusPoints = this.currentTiles.reduce((sum, tile) => sum + (tile.bonus ? this.config.letterPoints[tile.letter] * (this.config.bonusLetters.timeMultiplier - 1) : 0), 0);
+      const bonusPoints = this.currentTiles.reduce((sum, tile) => sum + (tile.bonus && !tile.blank ? this.config.letterPoints[tile.letter] * (this.config.bonusLetters.timeMultiplier - 1) : 0), 0);
       // Short-word caps apply only to the ordinary reward. Each gold letter's
       // extra time is then added, so the cap never erases a multiplier bonus.
-      return this.rewardFor(this.current) + this.uncappedTimeForPoints(bonusPoints, this.current.length);
+      return this.timeForPoints(this.pendingPoints,this.current.length) + this.uncappedTimeForPoints(bonusPoints, this.current.length);
     }
     get hasBonus() { return this.currentTiles.some(tile => tile.bonus); }
     get timeScale() { return this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
-    get isWord() { return this.dictionary.has(this.current); }
-    get isRepeat() { return this.used.has(this.current); }
+    get isWord() { return this.currentPrefixes.some(word=>this.dictionary.has(word)); }
+    get isRepeat() { return this.isWord && this.currentPrefixes.filter(word=>this.dictionary.has(word)).every(word=>this.used.has(word)); }
+    resolvedWord() {
+      let best='',bestWeight=-Infinity,repeat='';
+      for(const word of this.currentPrefixes){
+        if(!this.dictionary.has(word))continue;
+        if(this.used.has(word)){repeat ||= word;continue;}
+        // Favor common letters at blanks; ties keep alphabetical traversal order.
+        const weight=this.currentTiles.reduce((sum,tile,i)=>sum+(tile.blank?Math.log(this.config.letterFrequency[word[i]]||1e-9):0),0);
+        if(weight>bestWeight){best=word;bestWeight=weight;}
+      }
+      return best||repeat;
+    }
     advance(now) {
       if (this.phase !== 'running') return null;
       // Never cap this delta: a slow frame must not give the player free time.
@@ -108,13 +123,19 @@
     select(letter, now, options = {}) {
       const end = this.advance(now);
       if (end) return end;
-      if (this.phase !== 'running' || !/^[A-Z]$/i.test(letter)) return { type: 'ignored' };
-      this.current += letter.toUpperCase();
-      this.currentTiles.push({ letter: letter.toUpperCase(), bonus: options.bonus === true, grenade: options.grenade === true });
-      const result = this.prefixes.has(this.current) ? { type: 'letter', word: this.current } : this.penalize('spelling');
+      if (this.phase !== 'running' || !/^[A-Z?]$/i.test(letter)) return { type: 'ignored' };
+      const blank=letter==='?' || options.blank===true,symbol=blank?'?':letter.toUpperCase();
+      const next=[];
+      for(const prefix of this.currentPrefixes)for(const character of blank?'ABCDEFGHIJKLMNOPQRSTUVWXYZ':symbol){
+        if(this.prefixes.has(prefix+character))next.push(prefix+character);
+      }
+      this.current += symbol;
+      this.currentPrefixes=next;
+      this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:!blank && options.grenade===true });
+      const result = next.length ? { type: 'letter', word: this.current } : this.penalize('spelling');
       // Using a marked letter releases smoke even if it creates a bad prefix.
       // It cannot revive effects after a penalty ends the round.
-      if (options.grenade === true && this.phase === 'running') {
+      if (!blank && options.grenade === true && this.phase === 'running') {
         this.effects.smoke = this.config.smoke.durationSeconds;
         result.smokeTriggered = true;
       }
@@ -127,15 +148,17 @@
       if (!this.isWord) return this.penalize('incomplete');
       // Check repetition on submission so a used CAT can still become CATCH.
       if (this.isRepeat) return this.penalize('repeat');
-      const word = this.current;
-      const points = this.pointsFor(word);
+      const word = this.resolvedWord();
+      const points = this.pendingPoints;
       const requestedReward = this.pendingReward;
-      const bonusReward = requestedReward - this.rewardFor(word);
+      const bonusReward = requestedReward - this.timeForPoints(points,word.length);
       this.words.push(word);
+      this.wordScores.set(word,points);
       this.totalPoints += points;
       this.used.add(word);
       this.current = '';
       this.currentTiles = [];
+      this.currentPrefixes = [''];
       const before = this.remaining;
       this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
       const hourglassOffered = this.specialTilesUnlocked && this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
@@ -146,6 +169,7 @@
       const word = this.current;
       this.current = '';
       this.currentTiles = [];
+      this.currentPrefixes = [''];
       if (reason !== 'clear') this.mistakes++;
       const penaltyKey = reason === 'repeat' ? 'repeatWordSeconds' : reason === 'clear' ? 'clearWordSeconds' : 'invalidWordSeconds';
       const penalty = this.config.penalties[penaltyKey];

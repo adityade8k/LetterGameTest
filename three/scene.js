@@ -6,6 +6,7 @@ import { celMaterial, atmosphereMaterial, smokeMaterial } from './materials.js';
 import { createUI } from './ui.js';
 import { createIcon } from './icons.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
+import { viewportLayout } from './layout.mjs';
 
 function roundedSquare(size) {
   const half = size / 2 - DESIGN.tile.bevel, r = DESIGN.tile.corner;
@@ -35,6 +36,7 @@ export async function createScene(host, config, reducedMotion) {
   const ui = createUI(font, config, reducedMotion);
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
   camera.position.z = 60;
+  let layout;
   const background = new THREE.Scene(), scene = new THREE.Scene();
   const skyMaterial = atmosphereMaterial();
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(360, 640), skyMaterial);
@@ -85,8 +87,8 @@ export async function createScene(host, config, reducedMotion) {
     } else {
       // Separate typographic zones: badge row, letter, then point value.
       // Every glyph is fitted by its actual geometry, including wide W/M.
-      front.add(placeFace(textMesh(tile.letter,25),face.letter));
-      front.add(placeFace(textMesh(String(config.letterPoints[tile.letter]),5.5,.65),face.points));
+      if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25),face.letter));
+      front.add(placeFace(textMesh(String(tile.blank?0:config.letterPoints[tile.letter]),5.5,.65),face.points));
       if(tile.bonus)front.add(placeFace(textMesh(`x${config.bonusLetters.timeMultiplier}`,6,.8),face.bonus));
       if(tile.grenade)front.add(placeFace(createIcon('grenade',materials.plum,materials.gold),face.grenade));
     }
@@ -98,24 +100,47 @@ export async function createScene(host, config, reducedMotion) {
     group.userData.tile = tile;
     const halo = new THREE.Mesh(shadowGeometry, shadow); halo.position.z = -8; halo.renderOrder = -1;
     scene.add(halo, group);
-    const model = { group, halo }; bodies.set(tile, model); return model;
+    const fades=new Map();
+    if(tile.bornAt!==undefined)group.traverse(object=>{
+      if(!object.isMesh)return;
+      const source=object.material;
+      if(!fades.has(source)){const material=source.clone();material.transparent=true;material.depthWrite=false;fades.set(source,material);}
+      object.material=fades.get(source);
+    });
+    const model = { group, halo, fades }; bodies.set(tile, model); return model;
   }
-  const observer = new ResizeObserver(() => renderer.setSize(host.clientWidth, host.clientHeight, false));
+  function resize(){
+    const style=getComputedStyle(host);
+    layout=viewportLayout(host.clientWidth,host.clientHeight,parseFloat(style.getPropertyValue('--safe-top'))||0,parseFloat(style.getPropertyValue('--safe-bottom'))||0);
+    renderer.setSize(host.clientWidth,host.clientHeight,false);
+    camera.left=-layout.width/2;camera.right=layout.width/2;camera.top=layout.height/2;camera.bottom=-layout.height/2;camera.updateProjectionMatrix();
+    sky.scale.set(layout.width/360,layout.height/640,1);ui.resize(layout);
+  }
+  const observer = new ResizeObserver(resize);
   observer.observe(host);
-  renderer.setSize(host.clientWidth, host.clientHeight, false);
+  resize();
 
   function render(tiles, game, dt, now, hover, view) {
     const visible = new Set(tiles);
-    for (const [tile, model] of bodies) if (!visible.has(tile)) { scene.remove(model.group, model.halo); bodies.delete(tile); }
+    for (const [tile, model] of bodies) if (!visible.has(tile)) { scene.remove(model.group, model.halo);for(const material of model.fades.values())material.dispose();bodies.delete(tile); }
     for (const tile of tiles) {
       const model = bodies.get(tile) || build(tile);
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
-      model.group.position.set(tile.x - 180, 320 - DESIGN.fieldTop - tile.y + previewFloat, 0);
+      model.group.position.set(tile.x-layout.width/2,layout.height/2-tile.y+previewFloat,0);
       // Apply local Y turns before the fixed face tilt and screen-plane angle.
       model.group.rotation.set(DESIGN.tile.tiltX+(tile.pitch||0), DESIGN.tile.tiltY+(tile.yaw||0), -tile.tilt, 'ZXY');
       // Hover lifts the tile, without growing its collision silhouette.
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
-      model.halo.position.set(tile.x - 180 + 7, 320 - DESIGN.fieldTop - tile.y - 12 + previewFloat, -8);
+      model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
+      if(model.fades.size){
+        const opacity=Math.min(1,Math.max(0,(game.elapsed-tile.bornAt)/config.falling.replacementFadeSeconds));
+        for(const material of model.fades.values())material.uniforms.opacity.value=opacity;
+        if(opacity>=1){
+          const originals=new Map([...model.fades].map(([source,clone])=>[clone,source]));
+          model.group.traverse(object=>{if(originals.has(object.material))object.material=originals.get(object.material);});
+          for(const material of model.fades.values())material.dispose();model.fades.clear();
+        }
+      }
     }
     for (let i = bursts.length - 1; i >= 0; i--) {
       const p = bursts[i]; p.life -= game.phase === 'paused' ? 0 : dt;
@@ -125,33 +150,31 @@ export async function createScene(host, config, reducedMotion) {
     }
     const age = config.smoke.durationSeconds - game.effects.smoke;
     for (const cloud of clouds) {
-      const patch=cloud.userData.patch,localAge=Math.max(0,age-patch.delay);
+      const patch=cloud.userData.patch,pose=LetterfallEffects.smokePose(patch,age,game.effects.smoke,layout.width,layout.height,config.smoke,reducedMotion);
       cloud.visible=game.effects.smoke>0;
-      cloud.material.uniforms.opacity.value=LetterfallEffects.smokeEnvelope(age,game.effects.smoke,config.smoke,patch.delay);
-      cloud.material.uniforms.time.value=reducedMotion?0:localAge;
-      const bloom=reducedMotion?1:.8+.2*(1-Math.exp(-localAge*5))+.025*localAge;
-      const drift=reducedMotion?0:localAge*config.smoke.driftPixelsPerSecond;
-      cloud.position.set(patch.x*360-180+Math.cos(patch.phase)*drift,320-DESIGN.fieldTop-patch.y*DESIGN.fieldHeight+Math.sin(patch.phase)*drift,35);
-      cloud.scale.set(patch.diameter*bloom*patch.aspect,patch.diameter*bloom/patch.aspect,1);
+      cloud.material.uniforms.opacity.value=pose.opacity;
+      cloud.material.uniforms.time.value=reducedMotion?0:pose.localAge;
+      cloud.position.set(pose.x-layout.width/2,layout.height/2-pose.y,35);
+      cloud.scale.set(pose.diameter*patch.aspect,pose.diameter/patch.aspect,1);
     }
     skyMaterial.uniforms.time.value = reducedMotion ? 0 : game.elapsed;
     renderer.setScissorTest(false); renderer.clear(); renderer.render(background, camera);
     renderer.clearDepth();
-    renderer.setScissor(0, host.clientHeight * (1 - (DESIGN.fieldTop + DESIGN.fieldHeight) / 640), host.clientWidth, host.clientHeight * DESIGN.fieldHeight / 640);
-    renderer.setScissorTest(true); renderer.render(scene, camera); renderer.setScissorTest(false);
+    renderer.render(scene,camera);
     ui.sync(game, view); ui.animate(now,dt,game);
     renderer.clearDepth(); renderer.render(ui.scene, camera);
   }
   return {
     canvas, render, ui,
+    get layout(){return layout;},
     hit(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
-      const y = (clientY - rect.top) / rect.height * 640;
+      const x=(clientX-rect.left)/rect.width*layout.width,y=(clientY-rect.top)/rect.height*layout.height;
       pointer.set((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1);
       raycaster.setFromCamera(pointer, camera);
       const action = ui.hit(raycaster);
       if (action) return { action };
-      if (ui.blocking || y < DESIGN.fieldTop || y > DESIGN.fieldTop + DESIGN.fieldHeight) return null;
+      if (ui.obscures(x,y))return null;
       const hits = raycaster.intersectObjects([...bodies.values()].map(model => model.group), true);
       for (const hit of hits) { let obj = hit.object; while (obj && !obj.userData.tile) obj = obj.parent; if (obj) return { tile: obj.userData.tile }; }
       return null;
@@ -160,17 +183,17 @@ export async function createScene(host, config, reducedMotion) {
       if (reducedMotion) return;
       for (let i = 0; i < 7; i++) {
         const mesh = new THREE.Mesh(sphere, materials[tile.bonus ? 'gold' : 'cream']);
-        mesh.position.set(tile.x - 180, 320 - DESIGN.fieldTop - tile.y, 5);
+        mesh.position.set(tile.x-layout.width/2,layout.height/2-tile.y,5);
         scene.add(mesh); bursts.push({ mesh, life: .5, velocity: new THREE.Vector3((Math.random()-.5)*95, 20+Math.random()*65, 0) });
       }
     },
     releaseSmoke() {
       for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0;
-      const patches = LetterfallEffects.smokePatches(360, DESIGN.fieldHeight, config.smoke);
+      const patches = LetterfallEffects.smokePatches(layout.width,layout.height,config.smoke);
       for (const patch of patches) {
         const material=smoke.clone();material.uniforms.seed.value=patch.seed;
         const cloud = new THREE.Mesh(cloudGeometry,material);
-        cloud.userData.patch={...patch,diameter:Math.min(360,DESIGN.fieldHeight)*patch.radius*2};
+        cloud.userData.patch=patch;
         cloud.rotation.z=patch.phase;cloud.renderOrder=10;
         scene.add(cloud);clouds.push(cloud);
       }

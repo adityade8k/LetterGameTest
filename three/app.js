@@ -2,17 +2,20 @@ import { DESIGN } from './design.js';
 import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
-import { spawnPosition } from './spawn.mjs';
+import { spawnPosition, fieldPosition, DeferredRefills } from './spawn.mjs';
+import { exposedPosition, letterTarget } from './layout.mjs';
 
 // Only the WebGL canvas is attached to the page. The interface and its hit
 // targets live in ui.js; the original dictionary and game rules stay shared.
 if(document.readyState==='loading')await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
 const game=new Letterfall.WordGame(LETTERFALL_WORDS);
 const config=game.config,motion=LetterfallMotion;
+const refills=new DeferredRefills(config.falling);
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const width=DESIGN.width,height=DESIGN.fieldHeight,size=config.tiles.mobileSize;
+const size=config.tiles.mobileSize;
+let width=DESIGN.width,height=DESIGN.height,layout;
 const tileShape={pitchOffset:DESIGN.tile.tiltX,yawOffset:DESIGN.tile.tiltY,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
 const storageKey='letterfall.best.points.v2';
 let scene,tiles=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
@@ -38,21 +41,52 @@ function tone(kind) {
     });
   } catch { /* Audio does not affect gameplay. */ }
 }
-function makeTile(letter, x, y) {
-  return prepareTile({ ...tileShape, kind:'letter', letter, x, y, ...game.rollTileTraits(),
+function makeTile(letter, x, y,fade=false) {
+  const blank=letter==='?',traits=blank?{bonus:false,grenade:false}:game.rollTileTraits();
+  return prepareTile({ ...tileShape, kind:'letter', letter,blank,x,y,...traits,...(fade?{bornAt:game.elapsed}:{}),
     tilt:motion.radians((Math.random()*2-1)*config.rotation.maxInitialAngleDegrees), rotationSpeed:motion.rotationSpeed(config.rotation) },config);
 }
 function seed() {
-  const opening = LetterfallOpening.lettersFor(game.dictionary,config.opening.mobileTiles,()=>frequencySupply.next());
-  const positions = LetterfallOpening.scatter(opening.letters.length,width,height,size,config.opening);
-  tiles = opening.letters.map((letter,i) => makeTile(letter,positions[i].x,positions[i].y));
+  const count=Math.max(config.opening.mobileTiles,letterTarget(layout,config));
+  const blanks=config.wildcards.chance>0?config.wildcards.openingTiles:0;
+  const opening=LetterfallOpening.lettersFor(game.dictionary,Math.max(7,count-blanks),()=>frequencySupply.next());
+  // Place the guaranteed word first, so a crowded viewport never sacrifices it.
+  const remaining=[...opening.letters],required=[...opening.words[0]];
+  for(const letter of required)remaining.splice(remaining.indexOf(letter),1);
+  tiles=[];
+  for(const letter of [...required,...Array(blanks).fill('?'),...remaining]){
+    const position=fieldPosition(tiles,layout,size);
+    if(position)tiles.push(makeTile(letter,position.x,position.y));
+  }
   settleTiles(tiles,width,size,config.physics);
 }
 function nextLetter() {
+  if(Math.random()<config.wildcards.chance)return '?';
   return letterSupply.next(game.current,game.used,()=>frequencySupply.next());
 }
+function updateLayout(){
+  if(layout===scene.layout)return;
+  const old=layout;layout=scene.layout;width=layout.width;height=layout.height;
+  if(old){for(const tile of tiles){tile.x*=width/old.width;tile.y*=height/old.height;}}
+  settleTiles(tiles,width,size,config.physics);
+}
+function exposedTile(tile){return exposedPosition(tile.x,tile.y,layout,size/2)&&!scene.ui.obscures(tile.x,tile.y,size/2);}
+function refillChoices(afterPick=false){
+  if(game.phase!=='running')return;
+  const visible=tiles.filter(tile=>tile.kind==='letter'&&exposedTile(tile)).length;
+  const budget=refills.budget(visible,letterTarget(layout,config),afterPick);
+  const blocked=refills.blocked(game.elapsed);
+  for(let i=0;i<budget;i++){
+    const position=fieldPosition(tiles,layout,size,Math.random,blocked,refills.gaps);if(!position)break;
+    tiles.push(makeTile(nextLetter(),position.x,position.y,true));
+    refills.placed();
+  }
+  settleTiles(tiles,width,size,config.physics);
+}
 function spawn() {
-  const position=spawnPosition(tiles,width,size,config);
+  refillChoices();
+  const limit=Math.max(config.falling.letterLimit,letterTarget(layout,config)+Math.min(16,Math.ceil(width/size)*2));
+  const position=spawnPosition(tiles,width,size,{...config,falling:{...config.falling,letterLimit:limit}});
   if(position)tiles.push(makeTile(nextLetter(),position.x,position.y));
 }
 function offerHourglass() {
@@ -74,13 +108,17 @@ function handle(result){
   if(result.smokeTriggered){scene.releaseSmoke();feedback(`Smoke screen / ${format(config.smoke.durationSeconds)} seconds`);}
   sync();
 }
-function visibleTiles(){return tiles.filter(tile=>tile.y>size/2&&tile.y<height-size/2);}
+function visibleTiles(){return tiles.filter(tile=>exposedTile(tile)&&(tile.bornAt===undefined||game.elapsed-tile.bornAt>=config.falling.replacementFadeSeconds));}
 function pick(tile){
   if(game.phase!=='running'||view.mode)return;
+  if(tile.bornAt!==undefined&&game.elapsed-tile.bornAt<config.falling.replacementFadeSeconds)return;
   view.focus='';
   const result=tile.kind==='hourglass'?game.collectHourglass(performance.now()):game.select(tile.letter,performance.now(),tile);
-  if(['letter','penalty','effect'].includes(result.type)){tiles=tiles.filter(item=>item!==tile);scene.burst(tile);hover=null;}
-  handle(result);updateLabel();
+  if(['letter','penalty','effect'].includes(result.type)){
+    tiles=tiles.filter(item=>item!==tile);scene.burst(tile);hover=null;
+    if(tile.kind==='letter'&&game.phase==='running')refills.picked(tile,game.elapsed);
+  }
+  handle(result);refillChoices(true);updateLabel();
 }
 function sync(){
   view.best=best;view.roundBest=roundBest;view.soundOn=soundOn;
@@ -95,14 +133,14 @@ function sync(){
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
-  const letters=visibleTiles().map(tile=>tile.kind==='hourglass'?'hourglass pickup':`${tile.letter}${tile.bonus?' (gold)':''}${tile.grenade?' (grenade)':''}`).join(', ');
+  const letters=visibleTiles().map(tile=>tile.kind==='hourglass'?'hourglass pickup':tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.bonus?' (gold)':''}${tile.grenade?' (grenade)':''}`).join(', ');
   const effects=`${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
-  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; Enter submits; Backspace clears the whole word; 1 collects a visible hourglass; Escape pauses or resumes.`;
+  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; 1 collects a visible hourglass; Escape pauses or resumes.`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
-  roundBest=best;game.start(performance.now());scene.reset();spawnClock=0;hover=null;seed();
+  roundBest=best;game.start(performance.now());scene.reset();refills.reset();spawnClock=0;hover=null;updateLayout();seed();
   Object.assign(view,{mode:'',focus:'',hover:'',collectionPage:0,feedback:'',feedbackKind:''});feedbackUntil=0;resumeAfterMenu=false;
   sync();updateLabel();scene.canvas.focus({preventScroll:true});
 }
@@ -163,6 +201,7 @@ window.addEventListener('keydown',event=>{
   }
   if(view.mode||game.phase!=='running')return;
   if(event.key==='Backspace'){event.preventDefault();act('undo');}
+  else if(event.key==='?'||event.key==='*'){event.preventDefault();const tile=visibleTiles().find(t=>t.blank);if(tile)pick(tile);}
   else if(event.key==='1'){event.preventDefault();const tile=visibleTiles().find(t=>t.kind==='hourglass');if(tile)pick(tile);}
   else if(/^[a-z]$/i.test(event.key)){
     event.preventDefault();const tile=visibleTiles().filter(t=>t.letter===event.key.toUpperCase()).sort((a,b)=>b.y-a.y)[0];
@@ -171,6 +210,7 @@ window.addEventListener('keydown',event=>{
 });
 try{
   scene=await createScene(document.getElementById('scene'),config,reducedMotion);
+  updateLayout();
   scene.canvas.addEventListener('pointerdown',event=>{
     if(event.button!==0)return;
     event.preventDefault();scene.canvas.focus({preventScroll:true});view.focus='';
@@ -187,10 +227,10 @@ try{
   scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score is saved.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
-  tiles=[...'clttr'].map((letter,i)=>({...makeTile(letter,positions[i][0],positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
   sync();updateLabel();let previous=performance.now();
   function frame(now){
-    const dt=Math.min((now-previous)/1000,.05);previous=now;handle(game.advance(now));
+    const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));
     if(game.phase==='running'){
       const worldDt=dt*game.timeScale;
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion});
@@ -206,6 +246,6 @@ try{
   requestAnimationFrame(frame);
 }catch(error){
   console.error(error);
-  document.getElementById('scene').setAttribute('aria-label','clttr could not load. Refresh in a browser with WebGL enabled.');
-  document.title='clttr — unable to load the 3D scene';
+  document.getElementById('scene').setAttribute('aria-label','CLTTR could not load. Refresh in a browser with WebGL enabled.');
+  document.title='CLTTR — unable to load the 3D scene';
 }

@@ -4,6 +4,7 @@ import { celMaterial } from './materials.js';
 import { DESIGN } from './design.js';
 import { createIcon } from './icons.js';
 import { RewardMeters, clamp01, easeOut } from './reward-motion.mjs';
+import { overlapsPanel } from './layout.mjs';
 
 // Every visible interface element is geometry in this scene. There are no
 // DOM buttons, CSS labels, HTML textures, sprites, or CSS2D/CSS3D renderers.
@@ -30,7 +31,7 @@ export function createUI(font, config, reducedMotion=false) {
   let phase = 'ready', mode = '', focus = '', hover = '', lastPress = '', pressUntil = 0;
   let collectionPage = 0, collectionPages = 1;
   const meters=new RewardMeters(config.celebration),celebrations=[];
-  let lastBest=0;
+  let lastBest=0,currentLayout=null,effectsVisible=false;
 
   function group(parent = scene, x = 0, y = 0, z = 0) {
     const object = new THREE.Group();
@@ -38,7 +39,7 @@ export function createUI(font, config, reducedMotion=false) {
     parent.add(object); return object;
   }
   // Root groups use screen coordinates; children use local offsets.
-  const hud = group(scene), intro = group(scene), playing = group(scene), modal = group(scene);
+  const hud = group(scene), intro = group(scene), playing = group(scene), modal = group(scene),status=group(scene);
   // group(scene) puts its origin at the top left of the 360 x 640 camera.
   function rectGeometry(w, h, radius = 8, depth = 2) {
     const key = `${w}:${h}:${radius}:${depth}`;
@@ -147,7 +148,7 @@ export function createUI(font, config, reducedMotion=false) {
 
   // Raised header first, then a recessed clock channel, then the falling field.
   plinth(hud,12,10,336,99,15);
-  text(hud,'clttr',22,24,{size:27,spacing:-.8,raised:true});
+  text(hud,'CLTTR',22,24,{size:27,spacing:-.8,maxWidth:165,raised:true});
   text(hud,'POINTS',244,25,{size:5.5,align:'right',spacing:.6});
   text(hud,'BEST',291,25,{size:5.5,align:'right',spacing:.6});
   const pause=button(hud,'pause','',307,19,34,36,{iconName:'pause'});
@@ -272,6 +273,7 @@ export function createUI(font, config, reducedMotion=false) {
         text(g,'A FEW LITTLE THINGS.',180,119,{size:6.5,align:'center',spacing:.6});
         text(g,'Find your flow.',180,143,{size:25,align:'center',raised:true});
         lines(g,`Tap letters in order. Tap your word to submit.\n${config.rules.minWordLength}+ letters. No repeated words.`,180,187,{size:8,align:'center',lineHeight:14});
+        text(g,'Blank = any letter. Zero points.',180,217,{size:7,align:'center',material:'muted'});
         const rows=[
           ['arrow','Think a little bigger.',`3 letters: up to ${fmt(config.rewards.threeLetterMaxSeconds)}s. 4 letters: up to ${fmt(config.rewards.fourLetterMaxSeconds)}s.\n5+ letters buy you real time.`],
           ['gold','Gold adds extra time.','Even on short words. Points stay the same.'],
@@ -284,7 +286,7 @@ export function createUI(font, config, reducedMotion=false) {
         text(g,'A COLLECTION OF GOOD IDEAS.',180,151,{size:6,align:'center',spacing:.4});
         text(g,'Your words.',180,174,{size:25,align:'center',raised:true});
         const words=[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8);
-        words.forEach((word,i)=>{const x=45+(i%2)*142,y=230+Math.floor(i/2)*43;panel(g,x,y,128,33,'cream',6);text(g,word,x+9,y+8,{size:10,maxWidth:88});text(g,game.pointsFor(word),x+118,y+11,{size:7,align:'right',material:'muted'});});
+        words.forEach((word,i)=>{const x=45+(i%2)*142,y=230+Math.floor(i/2)*43;panel(g,x,y,128,33,'cream',6);text(g,word,x+9,y+8,{size:10,maxWidth:88});text(g,game.collectedPoints(word),x+118,y+11,{size:7,align:'right',material:'muted'});});
         text(g,`${collectionPage+1} / ${collectionPages}`,180,437,{size:8,align:'center',material:'muted'});
       }
       const label=help?'Got it':collecting?'Back to the letters':mode==='over'?'Play again':'Keep going';
@@ -295,6 +297,19 @@ export function createUI(font, config, reducedMotion=false) {
 
   return {
     scene,
+    resize(layout){
+      currentLayout=layout;
+      hud.position.y=status.position.y=rewardLayer.position.y=layout.height/2-layout.top;
+      intro.position.y=playing.position.y=640-layout.height/2+layout.bottom;
+      dim.scale.set(layout.width/360,layout.height/640,1);
+    },
+    obscures(x,y,margin=0){
+      if(mode)return true;
+      if(!currentLayout)return false;
+      if(overlapsPanel(x,y,currentLayout,margin))return true;
+      const localX=x-currentLayout.left,localY=y-currentLayout.top;
+      return effectsVisible&&localX>74-margin&&localX<286+margin&&localY>120-margin&&localY<144+margin;
+    },
     get blocking(){return Boolean(mode);},
     sync(game,view) {
       phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.min(view.collectionPage,collectionPages-1);
@@ -305,10 +320,10 @@ export function createUI(font, config, reducedMotion=false) {
       pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
       slot('sound',sound.root,view.soundOn,g=>{icon(g,view.soundOn?'sound':'silent',19,17,{scale:.65,material:'ink',z:6});text(g,view.soundOn?'Sound on':'Sound off',40,12,{size:8,material:'ink',z:6});});
       sound.label=`Turn sound ${view.soundOn?'off':'on'}`;
-      const signature=game.current+game.currentTiles.map(t=>t.bonus?'1':'0').join('')+phase;
+      const signature=game.current+game.currentTiles.map(t=>t.blank?'?':t.bonus?'1':'0').join('')+phase;
       slot('word',playing,signature,g=>{
         text(g,game.current?`${game.current.length} ${game.current.length===1?'LETTER':'LETTERS'} / TAP TO SUBMIT`:'PICK LETTERS IN ORDER',338,481,{size:5.8,align:'right',material:'muted',maxWidth:194});
-        if(game.current)text(g,game.current,35,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.bonus?'gold':'ink'),z:7});
+        if(game.current)text(g,game.current,35,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.bonus?'gold':'ink'),z:7});
         else text(g,'Catch a few letters...',35,516,{size:9,material:'muted',maxWidth:211,z:7});
       });
       setEnabled(submit,phase==='running'&&Boolean(game.current));setEnabled(undo,phase==='running'&&Boolean(game.current));
@@ -317,10 +332,11 @@ export function createUI(font, config, reducedMotion=false) {
       slot('words',playing,game.wordCount,g=>{
         text(g,`${String(game.wordCount).padStart(2,'0')}${game.wordCount?'  >':''}`,338,560,{size:8,align:'right'});
         if(!game.wordCount)text(g,'A small collection of good ideas.',22,584,{size:7.5,material:'muted'});
-        else [...game.words].reverse().slice(0,3).forEach((word,i)=>{const x=22+i*108;panel(g,x,579,100,22,'cream',5);text(g,word,x+7,585,{size:7.5,maxWidth:73});text(g,game.pointsFor(word),x+93,586,{size:6,align:'right',material:'muted'});});
+        else [...game.words].reverse().slice(0,3).forEach((word,i)=>{const x=22+i*108;panel(g,x,579,100,22,'cream',5);text(g,word,x+7,585,{size:7.5,maxWidth:73});text(g,game.collectedPoints(word),x+93,586,{size:6,align:'right',material:'muted'});});
       });
       const slow=Math.ceil(game.effects.hourglass),smoke=Math.ceil(game.effects.smoke);
-      slot('effects',playing,`${slow}:${smoke}`,g=>{
+      effectsVisible=phase==='running'&&Boolean(slow||smoke);status.visible=phase!=='ready';
+      slot('effects',status,`${slow}:${smoke}`,g=>{
         if(slow){panel(g,slow&&smoke?74:132,120,96,23,'mint',11);text(g,`SLOW TIME / ${slow}s`,slow&&smoke?122:180,128,{size:6.7,align:'center'});}
         if(smoke){panel(g,slow?184:137,120,slow?102:86,23,'paper',11);text(g,`SMOKE / ${smoke}s`,slow?235:180,128,{size:6.7,align:'center'});}
       });
@@ -363,10 +379,10 @@ export function createUI(font, config, reducedMotion=false) {
     description(game,view){
       if(mode==='paused')return 'Paused. A little breather. Your letters are right where you left them. The clock can wait.';
       if(mode==='over')return `Time to exhale. ${game.score} points from ${game.wordCount} words. Best ${view.best}.`;
-      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
+      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
-      return `${phase==='ready'?'clttr. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
+      return `${phase==='ready'?'CLTTR. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
     },
   };
 }

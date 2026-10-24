@@ -3,8 +3,8 @@
 export const DESIGN = {
   width: 360,
   height: 640,
-  fieldTop: 120,
-  fieldHeight: 337,
+  fieldTop: 0,
+  fieldHeight: 640, // The falling field fills the entire portrait canvas behind the HUD.
   pixelRatioLimit: 2,
   palette: {
     cream: ['#fae7b5', '#deb79b'],
