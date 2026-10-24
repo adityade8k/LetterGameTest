@@ -11,6 +11,10 @@ export function prepareTile(tile,config,random=Math.random){
     tile.yaw=random()*Math.PI*2;
     tile.rotationSpeed=radians(config.hourglass.rotationDegreesPerSecond);
   }else{
+    // Independent phase as well as speed/direction prevents a new cohort from
+    // turning together. Start within 60 degrees of either readable face, so
+    // an easy or reduced-motion opening cannot strand letters edge-on.
+    tile.yaw=(random()<.5?0:Math.PI)+randomRange(-Math.PI/3,Math.PI/3,random);
     const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
     tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
   }

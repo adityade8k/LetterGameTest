@@ -1,4 +1,4 @@
-import { exposedPosition } from './layout.mjs';
+import { exposedPosition, letterTarget } from './layout.mjs';
 // Keep one pick unfilled. Later picks release replacements through the top edge.
 export class DeferredRefills {
   constructor(){this.reset();}
@@ -13,7 +13,21 @@ export class DeferredRefills {
   placed(){if(this.pending>1)this.pending--;}
 }
 
-// Constant supply with collision-safe incoming and replacement positions.
+// Only scored words in this round advance supply. At full density these are
+// exactly the existing targets, interval and travel budget.
+export function supplyProfile(layout,size,config,wordCount=0){
+  const progress=Math.min(1,Math.max(0,wordCount)/config.density.wordsToFull);
+  const fraction=config.density.startFraction+(1-config.density.startFraction)*progress;
+  const fullTarget=Math.max(config.opening.mobileTiles,letterTarget(layout,config));
+  return {
+    fraction,
+    target:Math.min(fullTarget,Math.max(7+config.wildcards.openingTiles,Math.round(fullTarget*fraction))),
+    limit:Math.max(1,Math.floor(streamLimit(layout,size,config)*fraction)),
+    spawnSeconds:config.falling.mobileSpawnSeconds/fraction
+  };
+}
+
+// Collision-safe incoming and replacement positions.
 export function hasLetterRoom(tiles,limit){
   return tiles.reduce((count,tile)=>count+(tile.kind==='letter'?1:0),0)<limit;
 }
@@ -45,9 +59,9 @@ export function streamLimit(layout,size,config){
 }
 // At round start, continue the opening board back through the header to the
 // top entrance. Independent column phases avoid a second synchronized wave.
-export function openingFeed(tiles,layout,size,config,random=Math.random){
+export function openingFeed(tiles,layout,size,config,random=Math.random,density=1){
   const columns=Math.max(1,Math.floor(layout.width/(size+config.tiles.gapPixels)));
-  const spacing=size*1.45,positions=[];
+  const spacing=size*1.45/density,positions=[];
   const firstPanel=layout.panels[0],bottom=firstPanel.y+firstPanel.h+size*.6;
   for(let column=0;column<columns;column++){
     const x=(column+.5)*layout.width/columns+(random()-.5)*8;

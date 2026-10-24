@@ -3,8 +3,8 @@ import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
 import { DifficultyCurve } from './difficulty.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
-import { spawnPosition, fieldPosition, openingFeed, streamLimit, DeferredRefills } from './spawn.mjs';
-import { exposedPosition, letterTarget } from './layout.mjs';
+import { spawnPosition, fieldPosition, openingFeed, supplyProfile, DeferredRefills } from './spawn.mjs';
+import { exposedPosition } from './layout.mjs';
 import { ProgressStore, STORAGE_KEY } from '../progress.mjs';
 import { createAudio } from './audio.mjs';
 
@@ -75,8 +75,9 @@ function makeTile(letter, x, y,fade=false) {
   return prepareTile({ ...tileShape, kind:'letter', letter,blank,x,y,...traits,...(fade?{bornAt:game.elapsed}:{}),
     tilt:0 },config);
 }
+function currentSupply(){return supplyProfile(layout,size,config,game.wordCount);}
 function seed() {
-  const count=Math.max(config.opening.mobileTiles,letterTarget(layout,config));
+  const supply=currentSupply(),count=supply.target;
   const blanks=config.wildcards.chance>0?config.wildcards.openingTiles:0;
   const opening=LetterfallOpening.lettersFor(game.dictionary,Math.max(7,count-blanks),()=>frequencySupply.next());
   // Place the guaranteed word first, so a crowded viewport never sacrifices it.
@@ -87,7 +88,7 @@ function seed() {
     const position=fieldPosition(tiles,layout,size);
     if(position)tiles.push(makeTile(letter,position.x,position.y));
   }
-  for(const position of openingFeed(tiles,layout,size,config)){
+  for(const position of openingFeed(tiles,layout,size,config,Math.random,supply.fraction)){
     tiles.push(makeTile(nextLetter(),position.x,position.y));
   }
   settleTiles(tiles,width,size,config.physics);
@@ -104,13 +105,13 @@ function updateLayout(){
 }
 function exposedTile(tile){return exposedPosition(tile.x,tile.y,layout,size/2)&&!scene.ui.obscures(tile.x,tile.y,size/2);}
 function topEntry(){
-  const limit=streamLimit(layout,size,config);
+  const limit=currentSupply().limit;
   return spawnPosition(tiles,width,size,{...config,falling:{...config.falling,letterLimit:limit}});
 }
 function refillChoices(afterPick=false){
   if(game.phase!=='running')return;
   const visible=tiles.filter(tile=>tile.kind==='letter'&&exposedTile(tile)).length;
-  const budget=refills.budget(visible,letterTarget(layout,config),afterPick);
+  const budget=refills.budget(visible,currentSupply().target,afterPick);
   for(let i=0;i<budget;i++){
     // Replacements queue at the same top edge as normal drops, never in the field.
     const position=topEntry();if(!position)break;
@@ -330,7 +331,8 @@ try{
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
       tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
-      spawnClock+=worldDt;if(spawnClock>=config.falling.mobileSpawnSeconds){spawnClock%=config.falling.mobileSpawnSeconds;spawn();}
+      const spawnSeconds=currentSupply().spawnSeconds;
+      spawnClock+=worldDt;if(spawnClock>=spawnSeconds){spawnClock%=spawnSeconds;spawn();}
     }
     if(now>feedbackUntil){view.feedback='';view.feedbackKind='';}
     sync();scene.render(tiles,game,dt,now,hover,view);

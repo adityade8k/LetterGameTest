@@ -56,24 +56,24 @@ test('Y spin stops exactly at easy and scales with difficulty for ordinary and v
   const [,physics]=await modules,config=createConfig();
   for(const letter of ['A','Q']){
     const make=()=>physics.prepareTile({kind:'letter',letter,x:180,y:100,tilt:.2},config,rng(9));
-    const options={width:360,size:47,speed:0,config};
-    const easy=make();physics.stepTiles([easy],3,{...options,difficultyLevel:0});assert.equal(easy.yaw,0);assert.equal(easy.pitch,0);assert.equal(easy.tilt,0);
+    const options={width:360,size:47,speed:0,config},initialYaw=make().yaw;
+    const easy=make();physics.stepTiles([easy],3,{...options,difficultyLevel:0});assert.equal(easy.yaw,initialYaw);assert.equal(easy.pitch,0);assert.equal(easy.tilt,0);
     const low=make(),high=make();physics.stepTiles([low],1,{...options,difficultyLevel:.25});physics.stepTiles([high],1,{...options,difficultyLevel:.75});
-    near(high.yaw,3*(low.yaw));near(high.yaw,high.rotationSpeed*.75);
+    near(high.yaw-initialYaw,3*(low.yaw-initialYaw));near(high.yaw-initialYaw,high.rotationSpeed*.75);
     assert.ok(Math.abs(high.rotationSpeed)<=32*Math.PI/180);
     const angle=high.yaw;physics.stepTiles([high],2,{...options,difficultyLevel:0});near(high.yaw,angle);assert.equal(high.pitch,0);assert.equal(high.tilt,0);
-    const reduced=make();physics.stepTiles([reduced],1,{...options,difficultyLevel:1,reducedMotion:true});near(reduced.yaw,0);
-    const invalid=make();physics.stepTiles([invalid],1,{...options,difficultyLevel:NaN});near(invalid.yaw,0);
-    const capped=make();physics.stepTiles([capped],1,{...options,difficultyLevel:9});near(capped.yaw,capped.rotationSpeed);
+    const reduced=make();physics.stepTiles([reduced],1,{...options,difficultyLevel:1,reducedMotion:true});near(reduced.yaw,initialYaw);
+    const invalid=make();physics.stepTiles([invalid],1,{...options,difficultyLevel:NaN});near(invalid.yaw,initialYaw);
+    const capped=make();physics.stepTiles([capped],1,{...options,difficultyLevel:9});near(capped.yaw-initialYaw,capped.rotationSpeed);
   }
 });
 
 test('letter motion follows hourglass scale but pickup Y rotation is independent of difficulty',async()=>{
   const [,physics]=await modules,config=createConfig(),options={width:360,size:47,speed:0,config};
   const make=kind=>physics.prepareTile({kind,letter:'A',x:180,y:100,tilt:0},config,rng(2));
-  const normal=make('letter'),slow=make('letter');
+  const normal=make('letter'),slow=make('letter'),initialYaw=normal.yaw;
   physics.stepTiles([normal],1,{...options,difficultyLevel:1});physics.stepTiles([slow],.4,{...options,difficultyLevel:1});
-  near(slow.yaw,.4*normal.yaw);
+  near(slow.yaw-initialYaw,.4*(normal.yaw-initialYaw));
   const easy=make('hourglass'),hard=make('hourglass'),yaw=easy.yaw;
   physics.stepTiles([easy],1,{...options,difficultyLevel:0});physics.stepTiles([hard],1,{...options,difficultyLevel:1});
   near(easy.yaw,hard.yaw);near(easy.yaw-yaw,56*Math.PI/180);assert.equal(hard.tilt,0);assert.equal(hard.pitch,0);
