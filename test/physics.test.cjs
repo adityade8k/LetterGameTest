@@ -41,20 +41,20 @@ test('physics substeps do not allow a fast two-sided pickup to pass through anot
 test('zero dt freezes motion and zero rotation or reduced motion prevents turns',async()=>{
  const p=await physics,c=createConfig(),a=tile(p,c,180,100,'Q',.2);const before={...a};
  p.stepTiles([a],0,{width:360,size:47,speed:29,config:c});assert.deepEqual(a,before);
- p.stepTiles([a],2,{width:360,size:47,speed:29,config:c,reducedMotion:true});assert.equal(a.tilt,0);assert.equal(a.yaw,before.yaw);assert.equal(a.pitch,0);assert.ok(a.y>100);
+ p.stepTiles([a],2,{width:360,size:47,speed:29,config:c,reducedMotion:true});assert.equal(a.yaw,0);assert.equal(a.tilt,before.tilt);assert.equal(a.pitch,0);assert.ok(a.y>100);
  const off=createConfig({rotation:{minDegreesPerSecond:0,maxDegreesPerSecond:0}}),b=tile(p,off,180,100,'Q',.3);
- const stoppedYaw=b.yaw;p.stepTiles([b],3,{width:360,size:47,speed:29,config:off});assert.equal(b.tilt,0);assert.equal(b.yaw,stoppedYaw);assert.equal(b.pitch,0);
+ const stoppedTilt=b.tilt;p.stepTiles([b],3,{width:360,size:47,speed:29,config:off});assert.equal(b.yaw,0);assert.equal(b.tilt,stoppedTilt);assert.equal(b.pitch,0);
 });
-test('ordinary and high-value letters turn only around Y within their configured speeds',async()=>{
+test('ordinary and high-value letters turn only around Z within their configured speeds',async()=>{
  const p=await physics,c=createConfig({rotation:{ordinarySpinChance:0,highValueSpinChance:1,minDegreesPerSecond:10,maxDegreesPerSecond:20}}),random=rng(8);
  const a=tile(p,c,80,100,'A',.3,random),q=tile(p,c,260,100,'Q',-.4,random);
  assert.ok(Math.abs(q.rotationSpeed)>=15*Math.PI/180&&Math.abs(q.rotationSpeed)<=20*Math.PI/180);
- const initialYaw=new Map([[a,a.yaw],[q,q.yaw]]);
+ const initialTilt=new Map([[a,a.tilt],[q,q.tilt]]);
  p.stepTiles([a,q],6,{width:360,size:47,speed:0,config:c,difficultyLevel:1});
  for(const t of [a,q]){
-  assert.ok(Math.abs(t.yaw-initialYaw.get(t))>.7);assert.equal(t.pitch,0);assert.equal(t.tilt,0);
+  assert.ok(Math.abs(t.tilt-initialTilt.get(t))>.7);assert.equal(t.pitch,0);assert.equal(t.yaw,0);
   assert.equal(t.pitchOffset,0);assert.equal(t.yawOffset,0);
-  assert.ok(Math.abs(t.yaw-(initialYaw.get(t)+t.rotationSpeed*6)%(2*Math.PI))<1e-8);
+  assert.ok(Math.abs(t.tilt-(initialTilt.get(t)+t.rotationSpeed*6)%(2*Math.PI))<1e-8);
  }
 });
 test('invalid physical tuning and turn probabilities are rejected',()=>{
@@ -87,16 +87,16 @@ test('glyph fitting keeps narrow, wide and multi-character labels inside their z
 });
 
 
-test('Y-only letters keep the exact speed and upright pose across frames and difficulty changes',async()=>{
+test('Z-only letters keep the exact speed and front-facing pose across frames and difficulty changes',async()=>{
  const p=await physics,c=createConfig({rotation:{minDegreesPerSecond:20,maxDegreesPerSecond:20,randomDirection:false}});
  for(const letter of ['A','Q']){
-  const t=tile(p,c,180,100,letter,.25);let expected=t.yaw;
+  const t=tile(p,c,180,100,letter,.25);let expected=t.tilt;
   for(let frame=0;frame<600;frame++){
    const difficultyLevel=(1+Math.sin(frame/30))/2;
    p.stepTiles([t],1/60,{width:360,size:47,speed:0,config:c,difficultyLevel});
    expected+=20*Math.PI/180*difficultyLevel/60;
-   assert.equal(t.pitch,0);assert.equal(t.tilt,0);
-   assert.ok(Math.abs(t.yaw-expected%(2*Math.PI))<1e-8);
+   assert.equal(t.pitch,0);assert.equal(t.yaw,0);
+   assert.ok(Math.abs(t.tilt-expected%(2*Math.PI))<1e-8);
   }
  }
 });
@@ -116,18 +116,18 @@ test('projected collision bounds contain all corners of thick tumbling tiles',as
 test('letters born together have independent readable phases and never reset phase with difficulty',async()=>{
  const p=await physics,c=createConfig(),random=rng(42);
  const letters=Array.from({length:40},(_,i)=>tile(p,c,40+i*70,100,'A',0,random));
- const initial=letters.map(t=>t.yaw);
+ const initial=letters.map(t=>t.tilt);
  assert.equal(new Set(initial.map(a=>a.toFixed(6))).size,40);
- assert.ok(letters.every(t=>Math.abs(Math.cos(t.yaw))>=.5-1e-9));
+ assert.ok(letters.every(t=>Math.abs(Math.cos(t.tilt))>=.5-1e-9));
  assert.ok(new Set(letters.map(t=>t.rotationSpeed.toFixed(6))).size>30);
  assert.ok(letters.some(t=>t.rotationSpeed>0)&&letters.some(t=>t.rotationSpeed<0));
  const options={width:2900,size:47,speed:0,config:c};
- p.stepTiles(letters,1,{...options,difficultyLevel:0});assert.deepEqual(letters.map(t=>t.yaw),initial);
+ p.stepTiles(letters,1,{...options,difficultyLevel:0});assert.deepEqual(letters.map(t=>t.tilt),initial);
  p.stepTiles(letters,1,{...options,difficultyLevel:.6});
  for(const [i,t] of letters.entries()){
-  assert.ok(Math.abs(t.yaw-initial[i]-t.rotationSpeed*.6)<1e-8);
-  assert.equal(t.pitch,0);assert.equal(t.tilt,0);
+  assert.ok(Math.abs(t.tilt-initial[i]-t.rotationSpeed*.6)<1e-8);
+  assert.equal(t.pitch,0);assert.equal(t.yaw,0);
  }
- const angles=letters.map(t=>t.yaw);
- p.stepTiles(letters,1,{...options,difficultyLevel:0});assert.deepEqual(letters.map(t=>t.yaw),angles);
+ const angles=letters.map(t=>t.tilt);
+ p.stepTiles(letters,1,{...options,difficultyLevel:0});assert.deepEqual(letters.map(t=>t.tilt),angles);
 });

@@ -146,8 +146,8 @@ export async function createScene(host, config, reducedMotion) {
       const model = bodies.get(tile) || build(tile);
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
       model.group.position.set(tile.x-layout.width/2,layout.height/2-tile.y+previewFloat,0);
-      // Letters and pickups stay upright and rotate exclusively around Y.
-      model.group.rotation.set(0,tile.yaw||0,0,'ZXY');
+      // Logical Y points down, so negate the letter's screen-plane Z angle.
+      model.group.rotation.set(0,tile.kind==='hourglass'?(tile.yaw||0):0,tile.kind==='hourglass'?0:-(tile.tilt||0),'ZXY');
       // Hover lifts the tile, without growing its collision silhouette.
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);

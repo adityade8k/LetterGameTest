@@ -65,3 +65,60 @@ test('density settings reject invalid values and support restoring full supply i
   const {supplyProfile}=await spawnModule,{viewportLayout}=await layoutModule,c=createConfig({density:{startFraction:1}}),layout=viewportLayout(360,640);
   assert.deepEqual(supplyProfile(layout,c.tiles.mobileSize,c,0),supplyProfile(layout,c.tiles.mobileSize,c,100));
 });
+
+test('scored density eases in continuously, stays bounded, freezes on pause and resets',async()=>{
+  const {DensityRamp}=await spawnModule,c=createConfig(),ramp=new DensityRamp(c.density);
+  assert.equal(ramp.advance(30,0),0);
+  assert.equal(ramp.advance(0,5),0);
+  const first=ramp.advance(1/60,5);assert.ok(first>0&&first<.1);
+  assert.equal(ramp.advance(0,5),first);
+  let previous=first;
+  for(let i=0;i<600;i++){const next=ramp.advance(1/60,500);assert.ok(next>=previous&&next<=10);previous=next;}
+  assert.ok(previous>9.99);
+  ramp.reset();assert.equal(ramp.words,0);
+  const fine=new DensityRamp(c.density),coarse=new DensityRamp(c.density);
+  for(let i=0;i<120;i++)fine.advance(1/60,6);
+  assert.ok(Math.abs(fine.words-coarse.advance(2,6))<1e-9);
+  assert.throws(()=>createConfig({density:{transitionSeconds:0}}),/density/);
+});
+
+test('arrival cadence preserves progress through rate changes and retries blocked slots without bursts',async()=>{
+  const {ArrivalClock}=await spawnModule,clock=new ArrivalClock();
+  assert.equal(clock.advance(.5,1),false);
+  assert.equal(clock.advance(.25,.5),true);
+  // A blocked entry remains due, even on the very next frame.
+  assert.equal(clock.advance(1/60,.5),true);
+  assert.equal(clock.advance(30,.5),true);
+  clock.placed();assert.equal(clock.advance(1/60,.5),false);
+  clock.reset();assert.equal(clock.progress,0);
+});
+
+test('the sparse opening flows into live arrivals without a large empty band as density grows',async()=>{
+  const {supplyProfile,openingFeed,fieldPosition,spawnPosition,ArrivalClock,DensityRamp}=await spawnModule;
+  const {viewportLayout}=await layoutModule,p=await import('../three/physics.mjs');
+  const c=createConfig(),size=c.tiles.mobileSize,layout=viewportLayout(360,640);
+  for(let seed=1;seed<=40;seed++){
+    const random=rng(seed),clock=new ArrivalClock(),ramp=new DensityRamp(c.density);let tiles=[];
+    const make=pos=>p.prepareTile({...pos,kind:'letter',letter:'E',halfDepth:13.1},c,random);
+    const opening=supplyProfile(layout,size,c,0);
+    for(let i=0;i<opening.target;i++){const pos=fieldPosition(tiles,layout,size,random);if(pos)tiles.push(make(pos));}
+    tiles.push(...openingFeed(tiles,layout,size,c,random,opening.fraction).map(make));
+    p.settleTiles(tiles,360,size,c.physics);
+    let maxGap=0;
+    for(let frame=0;frame<900;frame++){
+      // Alternate rounds with no scoring and rounds reaching full density.
+      const words=seed%2?0:Math.floor(frame/90);
+      const supply=supplyProfile(layout,size,c,ramp.advance(1/30,words));
+      p.stepTiles(tiles,1/30,{width:360,size,speed:c.falling.pixelsPerSecond,config:c,difficultyLevel:frame/1350});
+      tiles=tiles.filter(t=>t.y<640+size);
+      if(clock.advance(1/30,supply.spawnSeconds)){
+        const pos=spawnPosition(tiles,360,size,{...c,falling:{...c.falling,letterLimit:supply.limit}},random);
+        if(pos){assert.ok(pos.y<0);tiles.push(make(pos));clock.placed();}
+      }
+      const ys=tiles.filter(t=>t.y>=140&&t.y<=446).map(t=>t.y).sort((a,b)=>a-b),edges=[140,...ys,446];
+      for(let i=1;i<edges.length;i++)maxGap=Math.max(maxGap,edges[i]-edges[i-1]);
+      if(frame%30===0)for(let i=0;i<tiles.length;i++)for(let j=i+1;j<tiles.length;j++)assert.ok((p.contact(tiles[i],tiles[j],size)?.penetration||0)<.05);
+    }
+    assert.ok(maxGap<90,`Seed ${seed}: empty band reached ${maxGap.toFixed(1)}px`);
+  }
+});

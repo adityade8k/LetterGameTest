@@ -92,7 +92,8 @@
   },
   "density": {
     "startFraction": 0.7,
-    "wordsToFull": 10
+    "wordsToFull": 10,
+    "transitionSeconds": 3
   },
   "letterFrequency": {
     "A": 8.04,
@@ -266,6 +267,7 @@
     if (config.falling.maxVisibleLetters < config.falling.visibleLetterTarget) throw new Error('config.js: falling.maxVisibleLetters must be at least visibleLetterTarget.');
     if (!Number.isInteger(config.falling.letterLimit) || config.falling.letterLimit < config.opening.mobileTiles) throw new Error('config.js: falling.letterLimit must be an integer at least opening.mobileTiles.');
     number('density', 'startFraction', 0, true);
+    number('density', 'transitionSeconds', 0, true);
     if (config.density.startFraction > 1) throw new Error('config.js: density.startFraction must be at most 1.');
     if (!Number.isInteger(config.density.wordsToFull) || config.density.wordsToFull < 1) throw new Error('config.js: density.wordsToFull must be a positive integer.');
     for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') number('letterFrequency', letter);

@@ -3,7 +3,7 @@ import { createScene } from './scene.js';
 import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
 import { DifficultyCurve } from './difficulty.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
-import { spawnPosition, fieldPosition, openingFeed, supplyProfile, DeferredRefills } from './spawn.mjs';
+import { spawnPosition, fieldPosition, openingFeed, supplyProfile, DensityRamp, ArrivalClock, DeferredRefills } from './spawn.mjs';
 import { exposedPosition } from './layout.mjs';
 import { ProgressStore, STORAGE_KEY } from '../progress.mjs';
 import { createAudio } from './audio.mjs';
@@ -15,6 +15,7 @@ const game=new Letterfall.WordGame(LETTERFALL_WORDS);
 const config=game.config;
 const difficulty=new DifficultyCurve(config.difficulty);
 const refills=new DeferredRefills();
+const densityRamp=new DensityRamp(config.density),arrivals=new ArrivalClock();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
@@ -23,7 +24,7 @@ const size=config.tiles.mobileSize;
 let width=DESIGN.width,height=DESIGN.height,layout;
 const tileShape={pitchOffset:0,yawOffset:0,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
 const storageKey='letterfall.best.points.v2';
-let scene,tiles=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
+let scene,tiles=[],hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
 let best=0,roundBest=0,resumeAfterMenu=false,roundId='',activeOffset=0,bestChain=0,lastCheckpoint=0,lastLowWarning=-Infinity;
 const menuStack=[];
 let storage;
@@ -75,7 +76,7 @@ function makeTile(letter, x, y,fade=false) {
   return prepareTile({ ...tileShape, kind:'letter', letter,blank,x,y,...traits,...(fade?{bornAt:game.elapsed}:{}),
     tilt:0 },config);
 }
-function currentSupply(){return supplyProfile(layout,size,config,game.wordCount);}
+function currentSupply(){return supplyProfile(layout,size,config,densityRamp.words);}
 function seed() {
   const supply=currentSupply(),count=supply.target;
   const blanks=config.wildcards.chance>0?config.wildcards.openingTiles:0;
@@ -124,7 +125,8 @@ function spawn() {
   // One arrival per opportunity keeps the stream staggered instead of batching
   // maintenance replacements with a second ordinary drop.
   const position=topEntry();
-  if(position){tiles.push(makeTile(nextLetter(),position.x,position.y));refills.placed();}
+  if(position){tiles.push(makeTile(nextLetter(),position.x,position.y));refills.placed();return true;}
+  return false;
 }
 function offerHourglass() {
   tiles=tiles.filter(tile=>tile.kind!=='hourglass');
@@ -189,7 +191,7 @@ function updateLabel(){
 }
 function begin(){
   if(roundId&&game.phase!=='over')finishRound(true);
-  roundBest=best;game.start(performance.now());difficulty.reset();scene.reset();refills.reset();spawnClock=0;hover=null;updateLayout();seed();
+  roundBest=best;game.start(performance.now());difficulty.reset();scene.reset();refills.reset();densityRamp.reset();arrivals.reset();hover=null;updateLayout();seed();
   roundId=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
   activeOffset=view.book.stats?.activeSeconds||0;bestChain=0;lastCheckpoint=0;lastLowWarning=-Infinity;
   progress.beginRound(roundId);refreshBook();
@@ -328,11 +330,12 @@ try{
       if(game.elapsed-lastCheckpoint>=10)checkpoint();
       if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){audio.play('lowtime');lastLowWarning=game.elapsed;}
       const worldDt=dt*game.timeScale;
+      densityRamp.advance(worldDt,game.wordCount);
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();
       tiles=tiles.filter(tile=>tile.y<height+size&&(tile.kind!=='hourglass'||game.hourglassOffer));
       const spawnSeconds=currentSupply().spawnSeconds;
-      spawnClock+=worldDt;if(spawnClock>=spawnSeconds){spawnClock%=spawnSeconds;spawn();}
+      if(arrivals.advance(worldDt,spawnSeconds)&&spawn())arrivals.placed();
     }
     if(now>feedbackUntil){view.feedback='';view.feedbackKind='';}
     sync();scene.render(tiles,game,dt,now,hover,view);

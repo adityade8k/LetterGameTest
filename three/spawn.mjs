@@ -13,6 +13,29 @@ export class DeferredRefills {
   placed(){if(this.pending>1)this.pending--;}
 }
 
+// Ease scored-word progress in simulation time, so pauses freeze the ramp and
+// slow time affects supply consistently. No scoring means no density increase.
+export class DensityRamp {
+  constructor(settings){this.settings=settings;this.reset();}
+  reset(){this.words=0;}
+  advance(dt,wordCount){
+    const target=Math.max(0,Math.min(this.settings.wordsToFull,wordCount));
+    if(dt>0){
+      this.words+=(target-this.words)*(1-Math.exp(-3*dt/this.settings.transitionSeconds));
+      if(Math.abs(target-this.words)<.0001)this.words=target;
+    }
+    return this.words;
+  }
+}
+
+// Keep a blocked arrival due, without building a burst of overdue letters.
+export class ArrivalClock {
+  constructor(){this.reset();}
+  reset(){this.progress=0;}
+  advance(dt,interval){this.progress=Math.min(1,this.progress+Math.max(0,dt)/interval);return this.progress>=1;}
+  placed(){this.progress=0;}
+}
+
 // Only scored words in this round advance supply. At full density these are
 // exactly the existing targets, interval and travel budget.
 export function supplyProfile(layout,size,config,wordCount=0){
@@ -57,17 +80,24 @@ export function streamLimit(layout,size,config){
   const columns=Math.max(1,Math.floor(layout.width/(size+config.tiles.gapPixels)));
   return Math.max(config.falling.letterLimit,columns*Math.ceil((layout.height+size*2)/(size*1.45)));
 }
-// At round start, continue the opening board back through the header to the
-// top entrance. Independent column phases avoid a second synchronized wave.
+// Pre-fill the hidden entrance with the same cadence as live arrivals. Work
+// upward from the opening edge, staggering across safe lanes rather than
+// giving each column its own large vertical gap and rejecting its neighbors.
 export function openingFeed(tiles,layout,size,config,random=Math.random,density=1){
   const columns=Math.max(1,Math.floor(layout.width/(size+config.tiles.gapPixels)));
-  const spacing=size*1.45/density,positions=[];
+  const clearance=size*1.45,positions=[];
+  const step=config.falling.pixelsPerSecond*config.falling.mobileSpawnSeconds/density;
   const firstPanel=layout.panels[0],bottom=firstPanel.y+firstPanel.h+size*.6;
-  for(let column=0;column<columns;column++){
-    const x=(column+.5)*layout.width/columns+(random()-.5)*8;
-    for(let y=bottom-random()*spacing;y>=-size;y-=spacing){
-      if([...tiles,...positions].every(tile=>Math.hypot(tile.x-x,tile.y-y)>=spacing))positions.push({x,y});
+  for(let y=bottom;y>=-size;y-=step){
+    const offset=Math.floor(random()*columns);
+    let best=null,bestDistance=-Infinity;
+    for(let i=0;i<columns;i++){
+      const column=(i+offset)%columns;
+      const x=(column+.5)*layout.width/columns;
+      const distance=[...tiles,...positions].reduce((nearest,tile)=>Math.min(nearest,Math.hypot(tile.x-x,tile.y-y)),Infinity);
+      if(distance>=clearance&&distance>bestDistance){best={x,y};bestDistance=distance;}
     }
+    if(best)positions.push(best);
   }
   return positions;
 }
