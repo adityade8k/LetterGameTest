@@ -1,0 +1,166 @@
+/* Pure rules and clock, shared by the p5 sketch and Node tests. */
+(function (root, factory) {
+  const configAPI = typeof module === 'object' && module.exports ? require('./config.js') : root.LetterfallConfig;
+  const api = factory(configAPI);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.Letterfall = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (configAPI) {
+  'use strict';
+  const { createConfig } = configAPI;
+  class WordGame {
+    constructor(dictionary, options = {}, random = Math.random) {
+      this.config = createConfig(options);
+      this.random = random;
+      this.dictionary = new Set(dictionary.map(word => word.toUpperCase()).filter(word => /^[A-Z]+$/.test(word) && word.length >= this.config.rules.minWordLength));
+      this.prefixes = new Set();
+      for (const word of this.dictionary) {
+        for (let length = 1; length <= word.length; length++) this.prefixes.add(word.slice(0, length));
+      }
+      this.reset();
+    }
+    reset() {
+      this.phase = 'ready';
+      this.remaining = this.config.timer.startSeconds;
+      this.elapsed = 0;
+      this.current = '';
+      this.currentTiles = [];
+      this.effects = { hourglass: 0, smoke: 0 };
+      this.hourglassOffer = false;
+      this.words = [];
+      this.totalPoints = 0;
+      this.used = new Set();
+      this.lastTime = null;
+      this.mistakes = 0;
+    }
+    start(now) { this.reset(); this.phase = 'running'; this.lastTime = now; }
+    get score() { return this.totalPoints; }
+    get wordCount() { return this.words.length; }
+    pointsFor(word) { return [...word.toUpperCase()].reduce((sum, letter) => sum + (this.config.letterPoints[letter] || 0), 0); }
+    uncappedTimeForPoints(points, length) {
+      const rewards = this.config.rewards;
+      const base = points * rewards.secondsPerPoint;
+      if (length <= 3) return base * rewards.threeLetterMultiplier;
+      if (length === 4) return base * rewards.fourLetterMultiplier;
+      return base * rewards.longWordMultiplier;
+    }
+    timeForPoints(points, length) {
+      const time = this.uncappedTimeForPoints(points, length);
+      if (length <= 3) return Math.min(this.config.rewards.threeLetterMaxSeconds, time);
+      if (length === 4) return Math.min(this.config.rewards.fourLetterMaxSeconds, time);
+      return time;
+    }
+    rewardFor(word) { return this.timeForPoints(this.pointsFor(word), word.length); }
+    get pendingReward() {
+      const bonusPoints = this.currentTiles.reduce((sum, tile) => sum + (tile.bonus ? this.config.letterPoints[tile.letter] * (this.config.bonusLetters.timeMultiplier - 1) : 0), 0);
+      // Short-word caps apply only to the ordinary reward. Each gold letter's
+      // extra time is then added, so the cap never erases a multiplier bonus.
+      return this.rewardFor(this.current) + this.uncappedTimeForPoints(bonusPoints, this.current.length);
+    }
+    get hasBonus() { return this.currentTiles.some(tile => tile.bonus); }
+    get timeScale() { return this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
+    get isWord() { return this.dictionary.has(this.current); }
+    get isRepeat() { return this.used.has(this.current); }
+    advance(now) {
+      if (this.phase !== 'running') return null;
+      // Never cap this delta: a slow frame must not give the player free time.
+      const seconds = Math.max(0, now - this.lastTime) / 1000;
+      this.lastTime = Math.max(this.lastTime, now);
+      // Integrate across the exact moment a slow-time effect expires. Effects
+      // count down in unscaled active time, even while the round clock is slow.
+      const slowSeconds = Math.min(seconds, this.effects.hourglass);
+      const slowDrain = slowSeconds * this.config.hourglass.timeScale;
+      const drain = slowDrain + seconds - slowSeconds;
+      const activeSeconds = this.remaining <= slowDrain
+        ? this.remaining / this.config.hourglass.timeScale
+        : Math.min(seconds, slowSeconds + this.remaining - slowDrain);
+      this.elapsed += activeSeconds;
+      this.effects.hourglass = Math.max(0, this.effects.hourglass - activeSeconds);
+      this.effects.smoke = Math.max(0, this.effects.smoke - activeSeconds);
+      this.remaining = Math.max(0, this.remaining - drain);
+      if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); return { type: 'ended' }; }
+      return null;
+    }
+    discardHourglass() { this.hourglassOffer = false; }
+    clearEffects() { this.effects.hourglass = 0; this.effects.smoke = 0; this.discardHourglass(); }
+    activate(effect, now) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase !== 'running' || !['hourglass', 'smoke'].includes(effect)) return { type: 'ignored' };
+      const duration = this.config[effect].durationSeconds;
+      // A second pickup refreshes the effect; it never multiplies its strength.
+      this.effects[effect] = duration;
+      if (effect === 'hourglass') this.discardHourglass();
+      return { type: 'effect', effect, duration };
+    }
+    collectHourglass(now) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase !== 'running' || !this.hourglassOffer) return { type: 'ignored' };
+      return this.activate('hourglass', now);
+    }
+    select(letter, now, options = {}) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase !== 'running' || !/^[A-Z]$/i.test(letter)) return { type: 'ignored' };
+      this.current += letter.toUpperCase();
+      this.currentTiles.push({ letter: letter.toUpperCase(), bonus: options.bonus === true, grenade: options.grenade === true });
+      const result = this.prefixes.has(this.current) ? { type: 'letter', word: this.current } : this.penalize('spelling');
+      // Using a marked letter releases smoke even if it creates a bad prefix.
+      // It cannot revive effects after a penalty ends the round.
+      if (options.grenade === true && this.phase === 'running') {
+        this.effects.smoke = this.config.smoke.durationSeconds;
+        result.smokeTriggered = true;
+      }
+      return result;
+    }
+    submit(now) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase !== 'running' || !this.current) return { type: 'ignored' };
+      if (!this.isWord) return this.penalize('incomplete');
+      // Check repetition on submission so a used CAT can still become CATCH.
+      if (this.isRepeat) return this.penalize('repeat');
+      const word = this.current;
+      const points = this.pointsFor(word);
+      const requestedReward = this.pendingReward;
+      const bonusReward = requestedReward - this.rewardFor(word);
+      this.words.push(word);
+      this.totalPoints += points;
+      this.used.add(word);
+      this.current = '';
+      this.currentTiles = [];
+      const before = this.remaining;
+      this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
+      const hourglassOffered = this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
+      if (hourglassOffered) this.hourglassOffer = true;
+      return { type: 'word', word, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
+    }
+    penalize(reason) {
+      const word = this.current;
+      this.current = '';
+      this.currentTiles = [];
+      if (reason !== 'clear') this.mistakes++;
+      const penaltyKey = reason === 'repeat' ? 'repeatWordSeconds' : reason === 'clear' ? 'clearWordSeconds' : 'invalidWordSeconds';
+      const penalty = this.config.penalties[penaltyKey];
+      this.remaining = Math.max(0, this.remaining - penalty);
+      if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); }
+      return { type: 'penalty', reason, word, penalty, ended: this.phase === 'over' };
+    }
+    undo(now) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase !== 'running' || !this.current) return { type: 'ignored' };
+      return this.penalize('clear');
+    }
+    pause(now) {
+      const end = this.advance(now);
+      if (end) return end;
+      if (this.phase === 'running') this.phase = 'paused';
+      return { type: 'paused' };
+    }
+    resume(now) {
+      if (this.phase === 'paused') { this.phase = 'running'; this.lastTime = now; }
+    }
+  }
+  return { WordGame };
+});
