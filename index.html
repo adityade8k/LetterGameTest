@@ -2,91 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f5ef">
-  <meta name="description" content="Catch falling letters. Make a word. Buy a little more time.">
-  <title>Letterfall — make every letter count.</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5b69a">
+  <meta name="description" content="CLTRRD. Catch falling letters, form words, and keep the clock alive.">
+  <title>CLTRRD</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css">
-  <script defer src="vendor/p5.min.js"></script>
+  <link rel="stylesheet" href="three/style.css">
+  <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
   <script defer src="data/words.js"></script>
   <script defer src="config.js"></script>
   <script defer src="engine.js"></script>
   <script defer src="motion.js"></script>
   <script defer src="effects.js"></script>
   <script defer src="opening.js"></script>
-  <script defer src="sketch.js"></script>
+  <script type="module" src="three/app.js"></script>
 </head>
 <body>
-  <main class="game-shell">
-    <section class="time-panel" aria-label="Time remaining">
-      <div class="time-label"><span><span class="live-dot"></span> A LITTLE TIME. A LOT OF WORDS.</span><span class="time-readout"><strong id="time-value">60</strong><span>sec</span></span></div>
-      <div class="timer-track" id="timer" role="progressbar" aria-label="Seconds remaining" aria-valuemin="0" aria-valuemax="60" aria-valuenow="60"><div id="timer-fill"></div></div>
-    </section>
-
-    <header class="game-header">
-      <a class="brand" href="./" aria-label="Letterfall home"><span class="brand-mark" aria-hidden="true"><i>L</i><i>f</i></span><span>letterfall<span class="brand-period">.</span></span></a>
-      <div class="header-right">
-        <div class="stat"><span>POINTS</span><strong id="score">00</strong></div>
-        <div class="stat best-stat"><span>PERSONAL BEST</span><strong id="best">00</strong></div>
-        <span class="header-divider"></span>
-        <button id="pause" class="icon-button" aria-label="Pause game" title="Pause · Escape" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12M16 6v12"/></svg></button>
-        <button id="sound" class="icon-button" aria-label="Turn sound on" aria-pressed="false" title="Turn sound on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path id="sound-waves" d="m16 9 5 6m0-6-5 6"/></svg></button>
-      </div>
-    </header>
-
-    <section class="playfield" id="playfield" aria-label="Falling letters">
-      <div class="field-caption" aria-hidden="true"><span>LOOK UP. CATCH A WORD.</span><span>↓</span></div>
-      <div id="canvas-host"></div>
-      <div class="effect-status" aria-label="Active effects"><span id="slow-status" hidden></span><span id="smoke-status" hidden></span></div>
-      <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
-      <div id="overlay" class="overlay">
-        <section class="intro-card" id="intro-card" aria-labelledby="intro-title">
-          <span class="eyebrow"><span class="mini-spark">✳</span> A QUICK GAME OF WORDPLAY</span>
-          <h1 id="intro-title">Make every<br><em>letter count.</em></h1>
-          <p class="intro-description">Catch falling letters. Make a word.<br>Buy yourself a little more time.</p>
-          <div class="rule-chips"><span id="reward-rule"></span><span id="repeat-rule"></span></div>
-          <button id="start" class="primary-button">Let’s play <span aria-hidden="true">↗</span></button>
-          <p class="intro-footnote" id="start-rules"></p>
-        </section>
-        <section class="intro-card" id="pause-card" aria-labelledby="pause-title" hidden>
-          <span class="eyebrow"><span class="mini-spark">Ⅱ</span> TAKE A BREATHER</span>
-          <h2 id="pause-title">Words can wait.</h2>
-          <p class="intro-description">Your time is on hold.</p>
-          <ol class="instructions"><li>Tap letters, then tap your word to submit.</li><li id="points-instruction"></li><li id="penalties-instruction"></li><li id="invalid-instruction"></li></ol>
-          <button id="resume" class="primary-button">Keep going <span aria-hidden="true">↗</span></button>
-          <p class="intro-footnote" id="time-cap"></p>
-        </section>
-        <section class="intro-card result-card" id="end-card" aria-labelledby="end-title" hidden>
-          <span class="eyebrow" id="end-eyebrow">THAT’S A WRAP</span>
-          <h2 id="end-title">Time’s up.</h2>
-          <div class="result-score"><strong id="final-score">0</strong><span id="final-label">points earned</span></div>
-          <p class="result-detail" id="result-detail">A fresh page is one play away.</p>
-          <button id="restart" class="primary-button">One more round <span aria-hidden="true">↻</span></button>
-          <p class="intro-footnote">Your personal best is saved on this device.</p>
-        </section>
-      </div>
-      <div class="catch-line"><span id="special-legend"></span></div>
-    </section>
-
-    <section class="word-panel" aria-labelledby="current-label">
-      <div class="section-heading"><h2 id="current-label">CURRENT WORD</h2><span id="word-hint">Pick letters in order</span></div>
-      <div class="word-controls">
-        <button id="submit-word" class="word-box" disabled aria-label="Submit current word">
-          <span id="current-word" class="current-word"><span class="word-placeholder">Your next word starts here</span></span>
-          <span id="submit-label" class="submit-label">TAP TO SUBMIT <span aria-hidden="true">↵</span></span>
-        </button>
-        <button id="undo" class="undo-button" disabled aria-label="Clear whole word"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H21v14H9L2 12l7-7Z"/><path d="m12 9 6 6m0-6-6 6"/></svg><span>UNDO</span><span id="undo-cost"></span></button>
-      </div>
-    </section>
-
-    <section class="collection" aria-labelledby="collection-label">
-      <div class="section-heading"><h2 id="collection-label">WORDS COLLECTED <span id="word-count" class="count-badge">0</span></h2><span>Every word is a little win.</span></div>
-      <div id="word-list" class="word-list" aria-live="polite"><p class="empty-collection">Nothing here yet. Let’s change that.</p></div>
-    </section>
-    <footer><span>GOOD WORDS. QUICK THINKING.</span><span class="keyboard-tip">Letter keys to catch <i>·</i> Enter to submit <i>·</i> Esc to pause</span><span class="mobile-tip">Catch. Spell. Repeat.</span></footer>
-    <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
-    <noscript>This game needs JavaScript enabled to run.</noscript>
-  </main>
+  <main id="scene" aria-label="CLTRRD word game"></main>
 </body>
 </html>

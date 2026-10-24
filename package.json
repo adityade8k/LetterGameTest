@@ -1,12 +1,14 @@
 {
-  "name": "letterfall",
-  "version": "1.0.0",
+  "name": "cltrrd",
+  "version": "2.0.0",
   "private": true,
-  "description": "A falling-letter word game built with p5.js.",
+  "description": "CLTRRD \u2014 a portrait word game with two-tone Three.js tiles.",
   "scripts": {
     "start": "node scripts/serve.cjs",
     "dev": "node scripts/serve.cjs",
     "test": "node --test test/*.test.cjs"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

@@ -10,7 +10,7 @@
   const defaults = {
     timer: {
       startSeconds: 60,
-      maxSeconds: 60,              // Time rewards cannot fill the clock past this.
+      maxSeconds: 120,             // Overtime: up to 200% of the 60-second starting limit.
       lowTimeSeconds: 15,
     },
     rules: { minWordLength: 3 },
@@ -33,6 +33,9 @@
       color: '#efcf79',
       borderColor: '#b89a45',
     },
+    specialTiles: {
+      warmupSeconds: 10,           // Active play before grenade tiles/hourglass drops unlock.
+    },
     hourglass: {
       enabled: true,
       minWordLength: 5,            // Only new words of at least this length qualify.
@@ -47,9 +50,12 @@
       letterSpeedMultiplier: 1.8,  // Grenade-marked letters fall faster.
       durationSeconds: 5,           // Not stretched by the hourglass effect.
       patchCount: 4,
-      radiusFraction: 0.22,         // Relative to the shorter playfield dimension.
+      radiusFraction: 0.27,         // Relative to the shorter playfield dimension.
       opacity: 1,
-      color: '#68716b',
+      fadeInSeconds: 0.5,
+      fadeOutSeconds: 1,
+      driftPixelsPerSecond: 4,      // Slow billowing, independent of the hourglass.
+      color: '#e891b0',
     },
     penalties: {
       clearWordSeconds: 2,          // Undo / Backspace clears the entire word.
@@ -57,18 +63,40 @@
       invalidWordSeconds: 5,        // Impossible prefix or unfinished submission.
     },
     falling: {
-      minPixelsPerSecond: 29,       // Speed at the start of a round.
-      maxPixelsPerSecond: 55,
-      increasePerWord: 1.1,        // Acceleration depends on word count, not points.
-      desktopSpawnSeconds: 0.54,    // Smaller intervals mean more letters.
-      mobileSpawnSeconds: 0.72,
+      minPixelsPerSecond: 31.32,    // 20% faster across the whole falling-speed curve.
+      maxPixelsPerSecond: 59.4,
+      increasePerWord: 1.188,      // Acceleration depends on word count, not points.
+      desktopSpawnSeconds: 0.45,    // 20% more spawn opportunities per second.
+      mobileSpawnSeconds: 0.6,
+    },
+    wordAssist: {
+      enabled: true,              // Experimental help for extending the selected word.
+      minPrefixLength: 4,         // Starts immediately after the fourth selected letter.
+      chance: 0.35,               // Chance a spawn uses a useful continuation; the rest stay random.
+      lookAhead: 2,               // Favor the next couple of letters in matching longer words.
+      nextLetterDecay: 0.4,       // Second letter has 40% of the immediate next letter's weight.
     },
     rotation: {
-      minDegreesPerSecond: 8,
-      maxDegreesPerSecond: 32,
+      minDegreesPerSecond: 5.6,     // 30% slower; combined speed across the axes.
+      maxDegreesPerSecond: 22.4,
       randomDirection: true,       // Mix clockwise and counterclockwise tiles.
       maxInitialAngleDegrees: 6,
       respectReducedMotion: true,  // Stop spinning when the OS requests less motion.
+      highValueMinPoints: 4,       // High-value turns emphasize Y; others emphasize Z.
+      highValueSpinChance: 0.85,
+      ordinarySpinChance: 0.12,
+      secondaryAxisWeight: 0.35,   // Add X/Y/Z tumble; 0 restores single-axis turns.
+      rockDegrees: 7,              // Non-spinning tiles gently rock within this angle.
+      restMinSeconds: 0.8,         // Pauses between slow turns (Y for high-value tiles).
+      restMaxSeconds: 2.4,
+    },
+    physics: {
+      collisionGap: 2,             // Extra separation around the rotated tile faces.
+      restitution: 0.08,           // Very little bounce; contacts mostly nudge.
+      lateralDamping: 2.6,
+      fallRecovery: 2.2,           // How gently a nudged tile resumes its falling speed.
+      solverIterations: 16,
+      wallPadding: 6,
     },
     tiles: {
       color: '#fffef7',             // Ordinary letters; gold letters are the exception.
@@ -110,6 +138,7 @@
     if (config.opening.maxHeightFraction > 1) throw new Error('config.js: opening.maxHeightFraction must be at most 1.');
     number('bonusLetters', 'chance');
     number('bonusLetters', 'timeMultiplier', 1);
+    number('specialTiles', 'warmupSeconds');
     if (!Number.isInteger(config.hourglass.minWordLength) || config.hourglass.minWordLength < 1) throw new Error('config.js: hourglass.minWordLength must be a positive integer.');
     number('hourglass', 'spawnChance');
     if (config.hourglass.spawnChance > 1) throw new Error('config.js: hourglass.spawnChance must be between 0 and 1.');
@@ -121,6 +150,8 @@
     number('smoke', 'letterSpeedMultiplier', 1, true);
     number('smoke', 'radiusFraction', 0, true);
     number('smoke', 'opacity', 0, true);
+    for (const key of ['fadeInSeconds', 'fadeOutSeconds', 'driftPixelsPerSecond']) number('smoke', key);
+    if (config.smoke.fadeInSeconds + config.smoke.fadeOutSeconds > config.smoke.durationSeconds) throw new Error('config.js: smoke fades must fit within durationSeconds.');
     if (config.bonusLetters.chance > 1) throw new Error('config.js: bonusLetters.chance must be between 0 and 1.');
     if (config.smoke.letterChance > 1) throw new Error('config.js: smoke.letterChance must be between 0 and 1.');
     if (config.hourglass.timeScale >= 1) throw new Error('config.js: hourglass.timeScale must be greater than 0 and less than 1.');
@@ -129,7 +160,25 @@
     for (const key of Object.keys(defaults.penalties)) number('penalties', key);
     for (const key of ['minPixelsPerSecond', 'maxPixelsPerSecond', 'increasePerWord']) number('falling', key);
     for (const key of ['desktopSpawnSeconds', 'mobileSpawnSeconds']) number('falling', key, 0, true);
+    if (typeof config.wordAssist.enabled !== 'boolean') throw new Error('config.js: wordAssist.enabled must be true or false.');
+    for (const key of ['minPrefixLength', 'lookAhead']) {
+      if (!Number.isInteger(config.wordAssist[key]) || config.wordAssist[key] < 1) throw new Error(`config.js: wordAssist.${key} must be a positive integer.`);
+    }
+    for (const key of ['chance', 'nextLetterDecay']) {
+      number('wordAssist', key);
+      if (config.wordAssist[key] > 1) throw new Error(`config.js: wordAssist.${key} must be between 0 and 1.`);
+    }
     for (const key of ['minDegreesPerSecond', 'maxDegreesPerSecond', 'maxInitialAngleDegrees']) number('rotation', key);
+    for (const key of ['highValueMinPoints', 'rockDegrees', 'restMinSeconds', 'restMaxSeconds', 'secondaryAxisWeight']) number('rotation', key);
+    if (config.rotation.secondaryAxisWeight > 1) throw new Error('config.js: rotation.secondaryAxisWeight must be between 0 and 1.');
+    for (const key of ['highValueSpinChance', 'ordinarySpinChance']) {
+      number('rotation', key);
+      if (config.rotation[key] > 1) throw new Error(`config.js: rotation.${key} must be between 0 and 1.`);
+    }
+    if (config.rotation.restMaxSeconds < config.rotation.restMinSeconds) throw new Error('config.js: rotation.restMaxSeconds must be at least restMinSeconds.');
+    for (const key of Object.keys(defaults.physics)) number('physics', key);
+    if (config.physics.restitution > 1) throw new Error('config.js: physics.restitution must be at most 1.');
+    if (!Number.isInteger(config.physics.solverIterations) || config.physics.solverIterations < 1 || config.physics.solverIterations > 64) throw new Error('config.js: physics.solverIterations must be an integer from 1 to 64.');
     for (const key of ['desktopSize', 'mobileSize', 'mobileBreakpoint']) number('tiles', key, 0, true);
     for (const key of ['gapPixels', 'hitPaddingPixels']) number('tiles', key);
     number('feedback', 'durationSeconds');

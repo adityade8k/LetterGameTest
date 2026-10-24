@@ -2,10 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { WordGame } = require('../engine.js');
 const { createConfig } = require('../config.js');
-const { hourglassPosition, smokePatches } = require('../effects.js');
+const { hourglassPosition, smokePatches, smokeEnvelope } = require('../effects.js');
 const dictionary = require('../data/words.js');
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} differs from ${expected}`);
-const create = (options, random = () => 0) => { const game = new WordGame(dictionary, options, random); game.start(0); return game; };
+const create = (options, random = () => 0) => { const game = new WordGame(dictionary, {specialTiles:{warmupSeconds:0}, ...options}, random); game.start(0); return game; };
 const spell = (game, word, now = 0, goldIndices = []) => [...word].map((letter, index) => game.select(letter, now, { bonus: goldIndices.includes(index) })).at(-1);
 
 test('hourglass runs for five unscaled seconds and slows the clock to 40 percent', () => {
@@ -103,7 +103,7 @@ test('multiple gold letters add their own time boosts without multiplying the wh
   assert.equal(game.submit(30000).points, 12);
 });
 test('gold multipliers and reward rates are configurable; the timer cap still applies', () => {
-  const game = create({ bonusLetters: { timeMultiplier: 3 }, rewards: { secondsPerPoint: .5 } });
+  const game = create({ timer: {maxSeconds:60}, bonusLetters: { timeMultiplier: 3 }, rewards: { secondsPerPoint: .5 } });
   spell(game, 'CATCH', 1000, [0]);
   const result = game.submit(1000);
   assert.equal(result.requestedReward, 13.5);
@@ -129,6 +129,7 @@ test('gold letters add time after short-word caps, with unchanged scores and no 
 });
 test('short-word gold bonuses honor configurable rates while the round timer still caps at its maximum', () => {
   const game = create({
+    timer: {maxSeconds:60},
     bonusLetters: {timeMultiplier: 3},
     rewards: {secondsPerPoint: 2, threeLetterMultiplier: .2, threeLetterMaxSeconds: .25},
   });
@@ -231,7 +232,7 @@ test('selecting a grenade letter immediately releases smoke and still spells and
   const word = game.submit(20000);
   assert.equal(word.points, 12);
   assert.equal(word.requestedReward, 22.5);
-  assert.equal(word.reward, 20); // Limited by the remaining room in the round clock.
+  assert.equal(word.reward, 22.5); // Can now bank the full reward above the starting limit.
   assert.equal(game.effects.smoke, 5);
   game.advance(25000);
   assert.equal(game.effects.smoke, 0);
@@ -257,10 +258,12 @@ test('smoke patches occupy separate random regions and scale with the playfield'
   const settings = createConfig().smoke;
   const patches = smokePatches(390, 500, settings, () => .5);
   assert.equal(patches.length, 4);
-  assert.deepEqual(patches.map(({x,y}) => [x,y]), [[.25,.25],[.75,.25],[.25,.75],[.75,.75]]);
+  assert.ok(patches.every(p=>p.x>=.12&&p.x<=.88&&p.y>=.12&&p.y<=.88));
+  for(let i=0;i<patches.length;i++)for(let j=i+1;j<patches.length;j++)assert.ok(Math.hypot(patches[i].x-patches[j].x,patches[i].y-patches[j].y)>.25);
   assert.ok(patches.every(patch => patch.radius > 0 && patch.radius < .3));
   const other = smokePatches(390, 500, settings, () => .2);
   assert.notDeepEqual(patches, other);
+  assert.notDeepEqual(patches.map(p=>p.seed),other.map(p=>p.seed));
 });
 test('invalid effect settings are rejected before a round starts', () => {
   assert.throws(() => createConfig({ hourglass: { timeScale: 0 } }), /hourglass.timeScale/);
@@ -271,4 +274,29 @@ test('invalid effect settings are rejected before a round starts', () => {
   assert.throws(() => createConfig({ hourglass: { spawnChance: 2 } }), /hourglass.spawnChance/);
   assert.throws(() => createConfig({ hourglass: { minWordLength: 0 } }), /hourglass.minWordLength/);
   assert.throws(() => createConfig({ hourglass: { speedMultiplier: 1 } }), /hourglass.speedMultiplier/);
+});
+
+
+test('pink smoke fades smoothly, holds an opaque center, and ends on time',()=>{
+ const s=createConfig().smoke;
+ near(smokeEnvelope(0,5,s),0);near(smokeEnvelope(.25,4.75,s),.5);
+ near(smokeEnvelope(1,4,s),1);near(smokeEnvelope(3,2,s),1);
+ near(smokeEnvelope(4.5,.5,s),.5);near(smokeEnvelope(5,0,s),0);
+ near(smokeEnvelope(.1,4.9,s,.12),0);
+ assert.throws(()=>createConfig({smoke:{fadeInSeconds:4,fadeOutSeconds:2}}));
+ assert.throws(()=>createConfig({smoke:{driftPixelsPerSecond:-1}}));
+});
+
+
+test('special tiles stay out of the opening and unlock only after active warm-up time',()=>{
+  const game=create({specialTiles:{warmupSeconds:10},hourglass:{spawnChance:1}});
+  for(let i=0;i<20;i++)assert.deepEqual(game.rollTileTraits(()=>0),{bonus:true,grenade:false});
+  spell(game,'CATCH',9999);assert.equal(game.submit(9999).hourglassOffered,false);
+  assert.equal(game.specialTilesUnlocked,false);
+  game.pause(9999);game.advance(999999);assert.equal(game.specialTilesUnlocked,false);
+  game.resume(999999);game.advance(1000000);
+  assert.equal(game.specialTilesUnlocked,true);assert.equal(game.rollTileTraits(()=>0).grenade,true);
+  spell(game,'SMILE',1000000);assert.equal(game.submit(1000000).hourglassOffered,true);
+  game.start(2000000);assert.equal(game.specialTilesUnlocked,false);assert.equal(game.rollTileTraits(()=>0).grenade,false);
+  assert.throws(()=>createConfig({specialTiles:{warmupSeconds:-1}}),/warmupSeconds/);
 });

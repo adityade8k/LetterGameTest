@@ -24,7 +24,7 @@ test('CATQ automatically loses five seconds and clears the spelling', () => {
   assert.equal(game.current, '');
   assert.equal(game.score, 0);
 });
-test('new words earn full letter points with length-based time; the clock stays capped', () => {
+test('new words earn full letter points with length-based time and can enter overtime', () => {
   const game = create();
   spell(game, 'CAT', 10000);
   assert.equal(game.submit(10000).reward, .5);
@@ -33,8 +33,8 @@ test('new words earn full letter points with length-based time; the clock stays 
   assert.equal(game.wordCount, 1);
   spell(game, 'CATCH', 10000); game.submit(10000);
   spell(game, 'DOG', 10000);
-  assert.equal(game.submit(10000).reward, 0);
-  assert.equal(game.remaining, 60);
+  assert.equal(game.submit(10000).reward, .5);
+  assert.equal(game.remaining, 69);
   assert.equal(game.score, 22);
   assert.equal(game.wordCount, 3);
 });
@@ -49,7 +49,7 @@ test('repeat submissions lose time without adding another point', () => {
   assert.equal(result.penalty, 2);
   assert.equal(game.score, 5);
   assert.equal(game.wordCount, 1);
-  assert.equal(game.remaining, 57);
+  assert.equal(game.remaining, 57.5);
 });
 test('a used word can be extended into a new word', () => {
   const game = create();
@@ -202,4 +202,18 @@ test('rare ordinary letters still obey the three- and four-letter base time caps
     assert.equal(result.hourglassOffered, false);
     assert.equal(game.score, game.pointsFor(word));
   }
+});
+
+
+test('default overtime banks rewards up to 200 percent, then drains and restarts normally',()=>{
+  const game=create();
+  assert.equal(game.remaining,60);assert.equal(game.config.timer.maxSeconds,120);
+  for(const word of ['CATCH','SMILE','STARE','FLOWER']){spell(game,word);game.submit(0);}
+  assert.equal(game.remaining,114);
+  spell(game,'FLOWERS');const capped=game.submit(0);
+  assert.equal(capped.reward,6);assert.equal(game.remaining,120);
+  spell(game,'CAT');assert.equal(game.submit(0).reward,0);assert.equal(game.remaining,120);
+  game.advance(60000);assert.equal(game.remaining,60);assert.equal(game.phase,'running');
+  game.advance(120000);assert.equal(game.remaining,0);assert.equal(game.phase,'over');
+  game.start(120000);assert.equal(game.remaining,60);
 });

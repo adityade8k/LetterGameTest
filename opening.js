@@ -1,4 +1,4 @@
-/* Opening-only word guarantees and scattered positions. Later supply is unchanged. */
+/* Opening-only word guarantees and scattered positions, independent of runtime supply. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

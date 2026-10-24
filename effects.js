@@ -20,14 +20,27 @@
     return best;
   }
   function smokePatches(width, height, settings, random = Math.random) {
-    const columns = Math.ceil(Math.sqrt(settings.patchCount * width / height));
-    const rows = Math.ceil(settings.patchCount / columns);
-    return Array.from({ length: settings.patchCount }, (_, index) => ({
-      x: (index % columns + .3 + random() * .4) / columns,
-      y: (Math.floor(index / columns) + .3 + random() * .4) / rows,
-      radius: settings.radiusFraction * (.9 + random() * .2),
-      phase: random() * Math.PI * 2,
-    }));
+    const patches=[],short=Math.min(width,height);
+    for(let index=0;index<settings.patchCount;index++){
+      let best,clearance=-Infinity;
+      // Free placement with spaced centers, rather than the same four quadrants.
+      for(let attempt=0;attempt<24;attempt++){
+        const candidate={x:.12+.76*((random()+attempt*.618034)%1),y:.12+.76*((random()+attempt*.754878)%1)};
+        const nearest=patches.reduce((distance,p)=>Math.min(distance,Math.hypot((p.x-candidate.x)*width/short,(p.y-candidate.y)*height/short)),Infinity);
+        if(nearest>clearance){best=candidate;clearance=nearest;}
+        if(nearest>=settings.radiusFraction*1.5)break;
+      }
+      patches.push({...best,radius:settings.radiusFraction*(.84+random()*.3),phase:random()*Math.PI*2,
+        seed:random()*1000,aspect:.85+random()*.3,delay:random()*.12});
+    }
+    return patches;
   }
-  return { hourglassPosition, smokePatches };
+  function smokeEnvelope(age,remaining,settings,delay=0){
+    if(age<=delay||remaining<=0)return 0;
+    const smooth=value=>{const t=Math.min(1,Math.max(0,value));return t*t*(3-2*t);};
+    const fadeIn=settings.fadeInSeconds>0?smooth((age-delay)/settings.fadeInSeconds):1;
+    const fadeOut=settings.fadeOutSeconds>0?smooth(remaining/settings.fadeOutSeconds):1;
+    return settings.opacity*fadeIn*fadeOut;
+  }
+  return { hourglassPosition, smokePatches, smokeEnvelope };
 });

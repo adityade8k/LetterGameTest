@@ -1,0 +1,46 @@
+import * as THREE from 'three';
+
+// Shared, modeled pictograms. Every symbol uses the same proportions and
+// rounded stroke weight in the menus and on the tiles; nothing is rasterized.
+const cache=new Map();
+function geometry(key,build){if(!cache.has(key))cache.set(key,build());return cache.get(key);}
+function polygon(key,points,depth=1.4){return geometry(key,()=>{const s=new THREE.Shape();points.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y));s.closePath();return new THREE.ExtrudeGeometry(s,{depth,bevelEnabled:true,bevelSize:.18,bevelThickness:.2,bevelSegments:1,curveSegments:8});});}
+function tube(key,points,radius=1.1){return geometry(key,()=>new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),28,radius,7,false));}
+export function createIcon(kind,ink,accent=ink){
+  const group=new THREE.Group();
+  const add=(geo,mat=ink,x=0,y=0,z=0)=>{const mesh=new THREE.Mesh(geo,mat);mesh.position.set(x,y,z);group.add(mesh);return mesh;};
+  if(kind==='arrow')add(polygon('arrow',[[-7,-5],[-5,-7],[5,3],[5,-2],[8,-2],[8,8],[-2,8],[-2,5],[3,5]]));
+  if(kind==='pause'){
+    for(const x of [-4,4])add(geometry('pause-bar',()=>new THREE.CapsuleGeometry(1.5,10,4,8)),ink,x,0,1);
+  }
+  if(kind==='undo'){
+    add(tube('undo',[[-6,4,1],[-1,6,1],[5,3,1],[5,-3,1],[0,-6,1],[-3,-5,1]],1.2));
+    add(polygon('undo-head',[[-9,4],[-3,9],[-3,1]]));
+  }
+  if(kind==='sun'){
+    for(let i=0;i<8;i++){const ray=add(geometry('ray',()=>new THREE.CapsuleGeometry(.65,4,3,6)),ink,Math.sin(i*Math.PI/4)*6,Math.cos(i*Math.PI/4)*6,1);ray.rotation.z=-i*Math.PI/4;}
+  }
+  if(kind==='sound'||kind==='silent'){
+    add(polygon('speaker',[[-8,-3],[-4,-3],[1,-7],[1,7],[-4,3],[-8,3]]));
+    if(kind==='sound'){
+      add(tube('wave1',[[4,4,1],[6,0,1],[4,-4,1]],.8));
+      add(tube('wave2',[[7,7,1],[10,0,1],[7,-7,1]],.8));
+    }else{
+      add(tube('mute1',[[5,3,1],[10,-3,1]],.9));add(tube('mute2',[[5,-3,1],[10,3,1]],.9));
+    }
+  }
+  if(kind==='hourglass'){
+    add(polygon('glass-frame',[[-8,9],[8,9],[7,5],[2,0],[7,-5],[8,-9],[-8,-9],[-7,-5],[-2,0],[-7,5]],2));
+    for(const y of [-11,11]){const cap=add(geometry('glass-cap',()=>new THREE.CapsuleGeometry(1.6,17,4,8)),ink,0,y,1);cap.rotation.z=Math.PI/2;}
+    add(polygon('sand-upper',[[-5,7],[5,7],[0,1]],.8),accent,0,0,2.2);
+    add(polygon('sand-lower',[[-5,-7],[5,-7],[0,-1]],.8),accent,0,0,2.2);
+  }
+  if(kind==='grenade'){
+    const body=add(geometry('grenade-body',()=>new THREE.CapsuleGeometry(5,4,4,10)),ink,0,-1,1);body.scale.z=.72;
+    add(geometry('grenade-neck',()=>new THREE.BoxGeometry(5,3,3)),ink,0,7,1);
+    add(polygon('grenade-lever',[[-2,10],[6,10],[9,3],[7,2],[4,8],[-2,8]],1.2),accent,0,0,1.5);
+    add(geometry('grenade-ring',()=>new THREE.TorusGeometry(2,.8,6,12)),accent,-4,10,2);
+    for(const y of [-3,1]){const band=add(geometry('grenade-band',()=>new THREE.TorusGeometry(4.8,.55,5,16)),accent,0,y,1);band.rotation.x=Math.PI/2;band.scale.y=.77;}
+  }
+  return group;
+}

@@ -1,0 +1,7 @@
+/* Host layout only. Every game visual is drawn by the Three.js WebGL renderer. */
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#ead1bf}
+body{min-height:100svh;display:grid;place-items:center;padding:20px;overflow:hidden}
+#scene{width:min(450px,calc((100svh - 40px)*9/16),100%);aspect-ratio:9/16}
+#scene canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+@media(max-width:500px){body{padding:0;min-height:100dvh}#scene{width:min(100vw,calc(100dvh*9/16))}}

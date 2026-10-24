@@ -7,11 +7,11 @@ const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10
 test('rotation honors both speed bounds and can turn in either direction', () => {
   const { rotation } = createConfig();
   let values = [0, .1];
-  near(rotationSpeed(rotation, () => values.shift()), -radians(8));
+  near(rotationSpeed(rotation, () => values.shift()), -radians(5.6));
   values = [1, .9];
-  near(rotationSpeed(rotation, () => values.shift()), radians(32));
+  near(rotationSpeed(rotation, () => values.shift()), radians(22.4));
   values = [.5, .1];
-  near(rotationSpeed(rotation, () => values.shift()), -radians(20));
+  near(rotationSpeed(rotation, () => values.shift()), -radians(14));
 });
 test('equal rotation limits give a fixed speed; zero disables rotation', () => {
   const fixed = createConfig({ rotation: { minDegreesPerSecond: 17, maxDegreesPerSecond: 17, randomDirection: false } });
@@ -39,7 +39,7 @@ test('bad timing and inverted bounds give actionable config errors', () => {
   assert.throws(() => createConfig({ rotation: { minDegreesPerSecond: 40, maxDegreesPerSecond: 10 } }), /rotation.maxDegreesPerSecond/);
   assert.throws(() => createConfig({ falling: { desktopSpawnSeconds: 0 } }), /falling.desktopSpawnSeconds/);
   assert.throws(() => createConfig({ falling: { minPixelsPerSecond: 100 } }), /falling.maxPixelsPerSecond/);
-  assert.throws(() => createConfig({ timer: { startSeconds: 100 } }), /timer.maxSeconds/);
+  assert.throws(() => createConfig({ timer: { startSeconds: 121 } }), /timer.maxSeconds/);
   assert.throws(() => createConfig({ rewards: { secondsPerPoint: -1 } }), /rewards.secondsPerPoint/);
   assert.throws(() => createConfig({ rewards: { threeLetterMaxSeconds: -1 } }), /rewards.threeLetterMaxSeconds/);
   assert.throws(() => createConfig({ rewards: { fourLetterMultiplier: NaN } }), /rewards.fourLetterMultiplier/);

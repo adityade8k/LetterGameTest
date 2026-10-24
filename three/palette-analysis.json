@@ -1,0 +1,23 @@
+{
+  "method": "Equal reference weights; art cropped to exclude edge UI. Role averages use HSV families in each artwork; palette cream and warm swatches contribute to matching roles. Darker paired tones chosen for legibility.",
+  "referenceMeans": [
+    "#dad8aa",
+    "#fb9082",
+    "#eaa877",
+    "#fab486"
+  ],
+  "overallMean": "#eeb18a",
+  "roleMeans": {
+    "cream": "#fae7b5",
+    "peach": "#f59c81",
+    "plum": "#8e6d73",
+    "mint": "#a8d8ac"
+  },
+  "referenceSwatches": [
+    "#ffe5cb",
+    "#fed276",
+    "#ffad62",
+    "#f59f88",
+    "#f18075"
+  ]
+}

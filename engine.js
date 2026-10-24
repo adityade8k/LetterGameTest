@@ -1,4 +1,4 @@
-/* Pure rules and clock, shared by the p5 sketch and Node tests. */
+/* Pure rules and clock, shared by Three.js, the classic p5 sketch and Node tests. */
 (function (root, factory) {
   const configAPI = typeof module === 'object' && module.exports ? require('./config.js') : root.LetterfallConfig;
   const api = factory(configAPI);
@@ -35,6 +35,13 @@
     start(now) { this.reset(); this.phase = 'running'; this.lastTime = now; }
     get score() { return this.totalPoints; }
     get wordCount() { return this.words.length; }
+    get specialTilesUnlocked() { return this.elapsed >= this.config.specialTiles.warmupSeconds; }
+    rollTileTraits(random = Math.random) {
+      return {
+        bonus: random() < this.config.bonusLetters.chance,
+        grenade: this.specialTilesUnlocked && random() < this.config.smoke.letterChance,
+      };
+    }
     pointsFor(word) { return [...word.toUpperCase()].reduce((sum, letter) => sum + (this.config.letterPoints[letter] || 0), 0); }
     uncappedTimeForPoints(points, length) {
       const rewards = this.config.rewards;
@@ -131,7 +138,7 @@
       this.currentTiles = [];
       const before = this.remaining;
       this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
-      const hourglassOffered = this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
+      const hourglassOffered = this.specialTilesUnlocked && this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
       if (hourglassOffered) this.hourglassOffer = true;
       return { type: 'word', word, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
     }
