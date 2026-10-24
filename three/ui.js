@@ -144,7 +144,7 @@ export function createUI(font, config) {
 
   // Raised header first, then a recessed clock channel, then the falling field.
   plinth(hud,12,10,336,99,15);
-  text(hud,'CLTRRD',22,24,{size:27,spacing:-.8,raised:true});
+  text(hud,'clttr',22,24,{size:27,spacing:-.8,raised:true});
   text(hud,'POINTS',244,25,{size:5.5,align:'right',spacing:.6});
   text(hud,'BEST',291,25,{size:5.5,align:'right',spacing:.6});
   const pause=button(hud,'pause','',307,19,34,36,{iconName:'pause'});
@@ -295,7 +295,7 @@ export function createUI(font, config) {
       if(mode==='over')return `Time to exhale. ${game.score} points from ${game.wordCount} words. Best ${view.best}.`;
       if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
-      return `${phase==='ready'?'CLTRRD. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}. ${view.feedback}`}`;
+      return `${phase==='ready'?'clttr. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}. Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}. ${view.feedback}`}`;
     },
   };
 }
