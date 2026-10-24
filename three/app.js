@@ -12,7 +12,7 @@ import { createAudio } from './audio.mjs';
 // targets live in ui.js; the original dictionary and game rules stay shared.
 if(document.readyState==='loading')await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
 const game=new Letterfall.WordGame(LETTERFALL_WORDS);
-const config=game.config,motion=LetterfallMotion;
+const config=game.config;
 const difficulty=new DifficultyCurve(config.difficulty);
 const refills=new DeferredRefills();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
@@ -21,7 +21,7 @@ const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
 let reducedMotion=motionPreference.matches;
 const size=config.tiles.mobileSize;
 let width=DESIGN.width,height=DESIGN.height,layout;
-const tileShape={pitchOffset:DESIGN.tile.tiltX,yawOffset:DESIGN.tile.tiltY,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
+const tileShape={pitchOffset:0,yawOffset:0,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
 const storageKey='letterfall.best.points.v2';
 let scene,tiles=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
 let best=0,roundBest=0,resumeAfterMenu=false,roundId='',activeOffset=0,bestChain=0,lastCheckpoint=0,lastLowWarning=-Infinity;
@@ -73,7 +73,7 @@ function finishRound(abandoned=false){
 function makeTile(letter, x, y,fade=false) {
   const blank=letter==='?',traits=blank?{bonus:false,grenade:false}:game.rollTileTraits();
   return prepareTile({ ...tileShape, kind:'letter', letter,blank,x,y,...traits,...(fade?{bornAt:game.elapsed}:{}),
-    tilt:motion.radians((Math.random()*2-1)*config.rotation.maxInitialAngleDegrees), rotationSpeed:motion.rotationSpeed(config.rotation) },config);
+    tilt:0 },config);
 }
 function seed() {
   const count=Math.max(config.opening.mobileTiles,letterTarget(layout,config));
@@ -223,7 +223,7 @@ function home(){
   game.reset();roundId='';scene.reset();menuStack.length=0;resumeAfterMenu=false;
   Object.assign(view,{mode:'',focus:'',hover:'',feedback:'',feedbackKind:''});
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false}));
   sync();updateLabel();
 }
 function queryInput(key){
@@ -319,7 +319,7 @@ try{
   scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score and saved Wordbook are safe.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false}));
   sync();updateLabel();let previous=performance.now();
   function frame(now){
     const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));

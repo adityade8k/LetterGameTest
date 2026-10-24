@@ -1,4 +1,4 @@
-// A round's Z-spin intensity, driven by unpaused active seconds rather than
+// A round's Y-spin intensity, driven by unpaused active seconds rather than
 // frame count or the refillable round timer. Randomness is sampled only when
 // choosing a new segment, so refresh rate cannot change the curve.
 const clamp = value => Math.max(0, Math.min(1, value));

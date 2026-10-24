@@ -4,57 +4,26 @@ const radians = n => n * Math.PI / 180;
 const randomRange = (min,max,random) => min+(max-min)*random();
 export function prepareTile(tile,config,random=Math.random){
   const rotation=config.rotation,high=(config.letterPoints[tile.letter]||0)>=rotation.highValueMinPoints;
-  tile.vx=0;tile.vy=null;tile.age=0;tile.baseTilt=tile.tilt;
-  // Y remains dominant on valuable letters, with a different 3D tumble per tile.
-  tile.turnAxis=high?'y':'z';tile.yaw=0;tile.pitch=0;
+  tile.vx=0;tile.vy=null;tile.age=0;
+  // All game tiles turn only around Y, with matching render/collision poses.
+  tile.pitch=0;tile.tilt=0;tile.pitchOffset=0;tile.yawOffset=0;tile.yaw=0;
   if(tile.kind==='hourglass'){
-    // A gameplay turn, not a decorative tumble: only Y, without rest periods.
-    tile.pitch=0;tile.tilt=0;tile.baseTilt=0;tile.pitchOffset=0;tile.yawOffset=0;
-    tile.yaw=random()*Math.PI*2;tile.spins=true;tile.turnAxis='y';
-    tile.turnAxes={x:0,y:1,z:0};tile.rest=0;
+    tile.yaw=random()*Math.PI*2;
     tile.rotationSpeed=radians(config.hourglass.rotationDegreesPerSecond);
-    return tile;
+  }else{
+    const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
+    tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
   }
-  tile.rockPhase=random()*Math.PI*2;
-  tile.spins=random()<(high?rotation.highValueSpinChance:rotation.ordinarySpinChance);
-  // High-value tiles use the upper half of the same user-controlled speed range.
-  const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
-  tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
-  // Keep a stable direction and personal speed for Z; difficulty changes only
-  // the speed factor, never the angle or direction abruptly.
-  tile.zRotationSpeed=tile.rotationSpeed;
-  tile.rest=randomRange(rotation.restMinSeconds,rotation.restMaxSeconds,random);
-  tile.turnLeft=radians(randomRange(150,240,random));
-  const secondary=()=>rotation.secondaryAxisWeight*randomRange(.65,1,random)*(random()<.5?-1:1);
-  tile.turnAxes={x:secondary(),y:high?1:secondary(),z:high?secondary():1};
-  const length=Math.hypot(...Object.values(tile.turnAxes));
-  for(const axis of ['x','y','z'])tile.turnAxes[axis]/=length;
   return tile;
 }
-function rotate(tile,dt,config,reducedMotion,random,difficultyLevel){
+function rotate(tile,dt,config,reducedMotion,difficultyLevel){
   if(dt<=0)return;
-  if(tile.kind==='hourglass'){
-    tile.age+=dt;tile.yaw=(tile.yaw+tile.rotationSpeed*dt)%(Math.PI*2);
-    return; // Essential face-choice motion also runs with reduced motion.
-  }
-  if(reducedMotion&&config.rotation.respectReducedMotion)return;
-  if(!config.rotation.maxDegreesPerSecond)return;
+  if(tile.kind!=='hourglass'&&reducedMotion&&config.rotation.respectReducedMotion)return;
   tile.age+=dt;
-  // All letters follow the same round intensity, with their own bounded
-  // speed. At zero, retain the current angle: no rocking or snap to upright.
-  tile.tilt=(tile.tilt+tile.zRotationSpeed*difficultyLevel*dt)%(Math.PI*2);
-  if(!tile.spins)return;
-  if(tile.rest>0){tile.rest=Math.max(0,tile.rest-dt);return;}
-  const amount=Math.min(tile.turnLeft,Math.abs(tile.rotationSpeed)*dt);
-  const signedAmount=Math.sign(tile.rotationSpeed)*amount;
-  tile.pitch=(tile.pitch+tile.turnAxes.x*signedAmount)%(Math.PI*2);
-  tile.yaw=(tile.yaw+tile.turnAxes.y*signedAmount)%(Math.PI*2);
-  tile.turnLeft-=amount;
-  if(tile.turnLeft<=1e-9){
-    tile.rest=randomRange(config.rotation.restMinSeconds,config.rotation.restMaxSeconds,random);
-    tile.turnLeft=radians(randomRange(150,240,random));
-    if(config.rotation.randomDirection&&random()<.35)tile.rotationSpeed*=-1;
-  }
+  // Pickups always turn so either face can be chosen. Letters use the same
+  // difficulty curve as before, now exclusively on Y; zero holds their angle.
+  const intensity=tile.kind==='hourglass'?1:difficultyLevel;
+  tile.yaw=(tile.yaw+tile.rotationSpeed*intensity*dt)%(Math.PI*2);
 }
 // Bound the projected thickness as well as the face when tiles turn on X/Y.
 export function projectedHalfSize(tile,size,gap=0){
@@ -114,7 +83,7 @@ export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,
       tile.vy+=(target-tile.vy)*(1-Math.exp(-settings.fallRecovery*step));
       tile.vx*=Math.exp(-settings.lateralDamping*step);
       tile.x+=tile.vx*step;tile.y+=tile.vy*step;
-      rotate(tile,step,config,reducedMotion,random,level);
+      rotate(tile,step,config,reducedMotion,level);
     }
     settleTiles(tiles,width,size,settings);
   }

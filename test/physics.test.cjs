@@ -7,6 +7,7 @@ const tile=(api,config,x,y,letter='A',tilt=0,random=rng())=>api.prepareTile({kin
 
 test('rotated tiles separate at contact and exchange a soft impulse',async()=>{
  const p=await physics,c=createConfig(),a=tile(p,c,150,100,'Q',.35),b=tile(p,c,177,128,'A',-.2);
+ a.tilt=.35;b.tilt=-.2; // Exercise the general contact solver with explicit test poses.
  a.vx=12;a.vy=50;b.vx=-4;b.vy=29;
  p.settleTiles([a,b],360,47,c.physics);
  assert.equal(p.contact(a,b,47,1.9),null);
@@ -40,16 +41,20 @@ test('physics substeps do not allow a fast two-sided pickup to pass through anot
 test('zero dt freezes motion and zero rotation or reduced motion prevents turns',async()=>{
  const p=await physics,c=createConfig(),a=tile(p,c,180,100,'Q',.2);const before={...a};
  p.stepTiles([a],0,{width:360,size:47,speed:29,config:c});assert.deepEqual(a,before);
- p.stepTiles([a],2,{width:360,size:47,speed:29,config:c,reducedMotion:true});assert.equal(a.tilt,.2);assert.equal(a.yaw,0);assert.equal(a.pitch,0);assert.ok(a.y>100);
+ p.stepTiles([a],2,{width:360,size:47,speed:29,config:c,reducedMotion:true});assert.equal(a.tilt,0);assert.equal(a.yaw,0);assert.equal(a.pitch,0);assert.ok(a.y>100);
  const off=createConfig({rotation:{minDegreesPerSecond:0,maxDegreesPerSecond:0}}),b=tile(p,off,180,100,'Q',.3);
- p.stepTiles([b],3,{width:360,size:47,speed:29,config:off});assert.equal(b.tilt,.3);assert.equal(b.yaw,0);assert.equal(b.pitch,0);
+ p.stepTiles([b],3,{width:360,size:47,speed:29,config:off});assert.equal(b.tilt,0);assert.equal(b.yaw,0);assert.equal(b.pitch,0);
 });
-test('high-value turn frequency and speed limits are configurable',async()=>{
+test('ordinary and high-value letters turn only around Y within their configured speeds',async()=>{
  const p=await physics,c=createConfig({rotation:{ordinarySpinChance:0,highValueSpinChance:1,minDegreesPerSecond:10,maxDegreesPerSecond:20}}),random=rng(8);
- const a=tile(p,c,80,100,'A',0,random),q=tile(p,c,260,100,'Q',0,random);
- assert.equal(a.spins,false);assert.equal(q.spins,true);assert.equal(q.turnAxis,'y');assert.equal(a.turnAxis,'z');assert.ok(Math.abs(q.rotationSpeed)>=15*Math.PI/180&&Math.abs(q.rotationSpeed)<=20*Math.PI/180);
- p.stepTiles([a,q],6,{width:360,size:47,speed:29,config:c,random});
- assert.ok(Math.abs(q.yaw)>.7);assert.ok(Math.abs(q.pitch)>.1);assert.equal(q.tilt,0);assert.ok(Math.abs(q.yaw)>Math.abs(q.pitch));assert.equal(a.yaw,0);assert.ok(Math.abs(a.tilt)<.25);
+ const a=tile(p,c,80,100,'A',.3,random),q=tile(p,c,260,100,'Q',-.4,random);
+ assert.ok(Math.abs(q.rotationSpeed)>=15*Math.PI/180&&Math.abs(q.rotationSpeed)<=20*Math.PI/180);
+ p.stepTiles([a,q],6,{width:360,size:47,speed:0,config:c,difficultyLevel:1});
+ for(const t of [a,q]){
+  assert.ok(Math.abs(t.yaw)>.7);assert.equal(t.pitch,0);assert.equal(t.tilt,0);
+  assert.equal(t.pitchOffset,0);assert.equal(t.yawOffset,0);
+  assert.ok(Math.abs(t.yaw-t.rotationSpeed*6)<1e-8);
+ }
 });
 test('invalid physical tuning and turn probabilities are rejected',()=>{
  assert.throws(()=>createConfig({physics:{restitution:2}}));
@@ -81,16 +86,18 @@ test('glyph fitting keeps narrow, wide and multi-character labels inside their z
 });
 
 
-test('XY turns preserve their axis mix while Z follows difficulty independently',async()=>{
- const p=await physics,c=createConfig({rotation:{ordinarySpinChance:1,highValueSpinChance:1,minDegreesPerSecond:20,maxDegreesPerSecond:20,restMinSeconds:0,restMaxSeconds:0}});
+test('Y-only letters keep the exact speed and upright pose across frames and difficulty changes',async()=>{
+ const p=await physics,c=createConfig({rotation:{minDegreesPerSecond:20,maxDegreesPerSecond:20,randomDirection:false}});
  for(const letter of ['A','Q']){
-  const t=tile(p,c,180,100,letter);p.stepTiles([t],1,{width:360,size:47,speed:0,config:c,difficultyLevel:1});
-  assert.ok([t.pitch,t.yaw,t.tilt].every(angle=>Math.abs(angle)>.001));
-  assert.ok(Math.abs(Math.hypot(t.pitch,t.yaw)-20*Math.PI/180*Math.hypot(t.turnAxes.x,t.turnAxes.y))<1e-8);
-  assert.ok(Math.abs(Math.abs(t.tilt)-20*Math.PI/180)<1e-8);
+  const t=tile(p,c,180,100,letter,.25);let expected=0;
+  for(let frame=0;frame<600;frame++){
+   const difficultyLevel=(1+Math.sin(frame/30))/2;
+   p.stepTiles([t],1/60,{width:360,size:47,speed:0,config:c,difficultyLevel});
+   expected+=20*Math.PI/180*difficultyLevel/60;
+   assert.equal(t.pitch,0);assert.equal(t.tilt,0);
+   assert.ok(Math.abs(t.yaw-expected%(2*Math.PI))<1e-8);
+  }
  }
- const single=createConfig({rotation:{highValueSpinChance:1,secondaryAxisWeight:0,restMinSeconds:0,restMaxSeconds:0}}),q=tile(p,single,180,100,'Q');
- p.stepTiles([q],2,{width:360,size:47,speed:0,config:single});assert.notEqual(q.yaw,0);assert.equal(q.pitch,0);assert.equal(q.tilt,0);
 });
 test('projected collision bounds contain all corners of thick tumbling tiles',async()=>{
  const p=await physics,random=rng(81);
