@@ -47,6 +47,16 @@
       return Math.min(this.config.combo.maxExtraSeconds, steps * this.config.combo.extraSecondsPerWord);
     }
     get nextLetterWindow() { return this.config.rules.nextLetterSeconds + this.comboBonusSeconds; }
+    get secondsUntilWordTimeout() {
+      if (!this.current) return Infinity;
+      // Convert the remaining clock units into real active time, including the
+      // switch back to normal speed when the current hourglass expires.
+      const slowSeconds = this.effects.hourglass;
+      const slowDrain = slowSeconds * this.config.hourglass.timeScale;
+      return this.letterSeconds <= slowDrain
+        ? this.letterSeconds / this.config.hourglass.timeScale
+        : slowSeconds + this.letterSeconds - slowDrain;
+    }
     recordComboWord() {
       if (!this.config.combo.enabled) return;
       this.comboCount++;
@@ -103,15 +113,15 @@
       const seconds = Math.max(0, now - this.lastTime) / 1000;
       this.lastTime = Math.max(this.lastTime, now);
       // Resolve inactivity at its exact deadline, before any remaining frame time.
-      const untilDeadline = this.current ? this.letterSeconds : Infinity;
+      const untilDeadline = this.secondsUntilWordTimeout;
       const end = this.elapse(Math.min(seconds, untilDeadline));
       if (end) return end;
-      if (seconds < untilDeadline) return null;
+      if (seconds + 1e-9 < untilDeadline) return null; // Ignore sub-nanosecond arithmetic residue.
       // Use the same scoring path as a tap: blanks, repeats, gold, and pickups
       // retain their rules. An unfinished prefix keeps the discard penalty.
       const timeout = this.isWord ? this.finishWord(true) : this.penalize('timeout');
       if (this.phase === 'running') {
-        const lateEnd = this.elapse(seconds - untilDeadline);
+        const lateEnd = this.elapse(Math.max(0, seconds - untilDeadline));
         // Preserve an auto-submission even if the rest of a delayed frame ends
         // the round, so presentation still saves its score and personal best.
         if (lateEnd) return timeout.type === 'word'
@@ -131,7 +141,9 @@
       this.elapsed += activeSeconds;
       this.comboSeconds = Math.max(0, this.comboSeconds - activeSeconds);
       if (this.comboSeconds <= 1e-9) this.resetCombo(); // Ignore floating-point residue at the boundary.
-      if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - activeSeconds);
+      // Both countdowns spend the same scaled time; the combo and effect
+      // durations continue to use real active seconds.
+      if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - Math.min(drain, this.remaining));
       this.effects.hourglass = Math.max(0, this.effects.hourglass - activeSeconds);
       this.effects.smoke = Math.max(0, this.effects.smoke - activeSeconds);
       this.remaining = Math.max(0, this.remaining - drain);

@@ -13,13 +13,13 @@
       maxSeconds: 120,             // Overtime: up to 200% of the 60-second starting limit.
       lowTimeSeconds: 15,
     },
-    rules: { minWordLength: 3, nextLetterSeconds: 2 }, // Base active seconds between letters; expiry resolves the word.
+    rules: { minWordLength: 3, nextLetterSeconds: 5 }, // Base clock seconds between letters; hourglass slows this countdown too.
     combo: {
       enabled: true,
       wordsToStart: 3,             // Third consecutive quick word unlocks extra thinking time.
       maxGapSeconds: 8,            // Reset after this many active seconds without a new word.
       extraSecondsPerWord: 0.25,   // Third word and every further quick word add this much.
-      maxExtraSeconds: 1,          // Added to rules.nextLetterSeconds: default cap is 3s.
+      maxExtraSeconds: 5,          // Added to rules.nextLetterSeconds: default cap is 10s.
     },
     wildcards: {
       chance: 0.05,                // Blank tiles among new letters; resolve automatically on submit.
@@ -53,7 +53,7 @@
       spawnChance: 1 / 3,          // Chance per qualifying word; 0 = never, 1 = always.
       speedMultiplier: 1.8,        // Falls from the top, faster than ordinary letters.
       durationSeconds: 5,           // Active real seconds; pausing freezes effects.
-      timeScale: 0.4,               // Countdown, falling, rotation and letter supply.
+      timeScale: 0.4,               // Round and letter countdowns, falling, rotation and letter supply.
       color: '#bce2d6',
     },
     smoke: {
