@@ -207,6 +207,12 @@
       const points = this.pendingPoints;
       const requestedReward = this.pendingReward;
       const bonusReward = requestedReward - this.timeForPoints(points,word.length);
+      // Presentation and lifetime history consume this confirmed event. Capture
+      // the original pattern before clearing it; never infer blank use later.
+      const pattern = this.current;
+      const selectedTiles = this.currentTiles.map(tile => ({ ...tile }));
+      const blankCount = selectedTiles.filter(tile => tile.blank).length;
+      const activeSeconds = this.elapsed;
       this.words.push(word);
       this.wordScores.set(word,points);
       this.totalPoints += points;
@@ -220,7 +226,7 @@
       this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
       const hourglassOffered = this.specialTilesUnlocked && this.config.hourglass.enabled && word.length >= this.config.hourglass.minWordLength && this.random() < this.config.hourglass.spawnChance;
       if (hourglassOffered) this.hourglassOffer = true;
-      return { type: 'word', automatic, comboCount: this.comboCount, letterWindow: this.nextLetterWindow, word, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
+      return { type: 'word', automatic, comboCount: this.comboCount, letterWindow: this.nextLetterWindow, word, pattern, selectedTiles, blankCount, activeSeconds, wordIndex: this.words.length, points, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
     }
     penalize(reason) {
       this.resetCombo();

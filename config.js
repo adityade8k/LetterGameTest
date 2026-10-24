@@ -8,148 +8,200 @@
   else root.LetterfallConfig = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const defaults = {
-    timer: {
-      startSeconds: 60,
-      maxSeconds: 120,             // Overtime: up to 200% of the 60-second starting limit.
-      lowTimeSeconds: 15,
-    },
-    rules: { minWordLength: 3, nextLetterSeconds: 5 }, // Base clock seconds between letters; hourglass slows this countdown too.
-    combo: {
-      enabled: true,
-      wordsToStart: 3,             // Third consecutive quick word unlocks extra thinking time.
-      maxGapSeconds: 8,            // Reset after this many active seconds without a new word.
-      extraSecondsPerWord: 0.25,   // Third word and every further quick word add this much.
-      maxExtraSeconds: 5,          // Added to rules.nextLetterSeconds: default cap is 10s.
-    },
-    wildcards: {
-      chance: 0.05,                // Blank tiles among new letters; resolve automatically on submit.
-      openingTiles: 1,             // Opening blanks replace filler; guaranteed words keep their letters.
-    },
-    opening: {
-      desktopTiles: 14,
-      mobileTiles: 16,              // Each opening supports 7-, 6-, 5-, 3-letter words.
-      maxHeightFraction: 0.88,       // Scatter the larger opening throughout the playfield.
-    },
-    rewards: {
-      secondsPerPoint: 1,           // Global time-reward scale; points stay unchanged.
-      threeLetterMultiplier: 0.1,
-      threeLetterMaxSeconds: 0.5,   // Ordinary reward cap; gold time is added afterward.
-      fourLetterMultiplier: 0.25,
-      fourLetterMaxSeconds: 2,      // Ordinary reward cap; gold time is added afterward.
-      longWordMultiplier: 1.5,      // Five or more letters: substantial time reward.
-    },
-    bonusLetters: {
-      chance: 0.16,                 // Fraction of letters that are gold (0 to 1).
-      timeMultiplier: 2,            // Extra letter time bypasses short-word caps; score stays normal.
-      color: '#efcf79',
-      borderColor: '#b89a45',
-    },
-    specialTiles: {
-      warmupSeconds: 20,           // Active-play delay; independent of the constant game pace.
-    },
-    hourglass: {
-      enabled: true,
-      minWordLength: 5,            // Only new words of at least this length qualify.
-      spawnChance: 1 / 3,          // Chance per qualifying word; 0 = never, 1 = always.
-      speedMultiplier: 1.8,        // Falls from the top, faster than ordinary letters.
-      durationSeconds: 5,           // Active real seconds; pausing freezes effects.
-      timeScale: 0.4,               // Round and letter countdowns, falling, rotation and letter supply.
-      color: '#bce2d6',
-    },
-    smoke: {
-      letterChance: 0.09,          // Fraction of letters carrying a grenade icon.
-      letterSpeedMultiplier: 1.8,  // Grenade-marked letters fall faster.
-      durationSeconds: 5,           // Not stretched by the hourglass effect.
-      patchCount: 4,
-      radiusFraction: 0.27,         // Relative to the shorter playfield dimension.
-      opacity: 1,
-      fadeInSeconds: 0.8,
-      fadeOutSeconds: 1.2,
-      enterSeconds: 1.1,           // Clouds drift in from left/right, then return toward a side.
-      exitSeconds: 1.2,
-      driftPixelsPerSecond: 4,      // Slow billowing, independent of the hourglass.
-      color: '#e891b0',
-    },
-    penalties: {
-      clearWordSeconds: 2,          // Undo or an invalid timeout discards the entire word.
-      repeatWordSeconds: 2,
-      invalidWordSeconds: 5,        // Impossible prefix or unfinished submission.
-    },
-    falling: {
-      pixelsPerSecond: 31.32,      // Constant Three.js pace, unaffected by elapsed time or word count.
-      letterLimit: 26,             // Minimum budget for top drops; grows with viewport, excludes pickups.
-      visibleLetterTarget: 20,     // Opening target; refill demand sends incoming letters from above.
-      maxVisibleLetters: 48,
-      replacementFadeSeconds: 0.14,// Replacements fade in above the screen before falling into view.
-      // Legacy p5 speed curve below; Three.js uses pixelsPerSecond above.
-      minPixelsPerSecond: 31.32,
-      maxPixelsPerSecond: 59.4,
-      increasePerWord: 1.188,      // Acceleration depends on word count, not points.
-      desktopSpawnSeconds: 0.45,    // 20% more spawn opportunities per second.
-      mobileSpawnSeconds: 0.35,    // More letter choices, with collision-safe top-entry spacing.
-    },
-    letterFrequency: {
-      // English text percentages: Peter Norvig, Google Books corpus analysis.
-      // https://www.norvig.com/mayzner.html — relative weights, not scores.
-      A:8.04, B:1.48, C:3.34, D:3.82, E:12.49, F:2.40, G:1.87,
-      H:5.05, I:7.57, J:0.16, K:0.54, L:4.07, M:2.51, N:7.23,
-      O:7.64, P:2.14, Q:0.12, R:6.28, S:6.51, T:9.28, U:2.73,
-      V:1.05, W:1.68, X:0.23, Y:1.66, Z:0.09,
-    },
-    celebration: {
-      durationSeconds: 1.1,       // Small reward labels fade beside the score and clock.
-      timerRefillSeconds: 0.65,   // Visual refill only; earned time applies immediately.
-      scoreCountSeconds: 0.35,
-    },
-    wordAssist: {
-      enabled: true,              // Experimental help for extending the selected word.
-      minPrefixLength: 4,         // Starts immediately after the fourth selected letter.
-      chance: 0.35,               // Chance a spawn uses a useful continuation; the rest stay random.
-      lookAhead: 2,               // Favor the next couple of letters in matching longer words.
-      nextLetterDecay: 0.4,       // Second letter has 40% of the immediate next letter's weight.
-    },
-    rotation: {
-      minDegreesPerSecond: 5.6,     // 30% slower; combined speed across the axes.
-      maxDegreesPerSecond: 22.4,
-      randomDirection: true,       // Mix clockwise and counterclockwise tiles.
-      maxInitialAngleDegrees: 6,
-      respectReducedMotion: true,  // Stop spinning when the OS requests less motion.
-      highValueMinPoints: 4,       // High-value turns emphasize Y; others emphasize Z.
-      highValueSpinChance: 0.85,
-      ordinarySpinChance: 0.12,
-      secondaryAxisWeight: 0.35,   // Add X/Y/Z tumble; 0 restores single-axis turns.
-      rockDegrees: 7,              // Non-spinning tiles gently rock within this angle.
-      restMinSeconds: 0.8,         // Pauses between slow turns (Y for high-value tiles).
-      restMaxSeconds: 2.4,
-    },
-    physics: {
-      collisionGap: 2,             // Extra separation around the rotated tile faces.
-      restitution: 0.08,           // Very little bounce; contacts mostly nudge.
-      lateralDamping: 2.6,
-      fallRecovery: 2.2,           // How gently a nudged tile resumes its falling speed.
-      solverIterations: 16,
-      wallPadding: 6,
-    },
-    tiles: {
-      color: '#fffef7',             // Ordinary letters; gold letters are the exception.
-      textColor: '#354a33',
-      pointColor: '#70815a',
-      borderColor: '#cbd3bb',
-      hoverBorderColor: '#6f9143',
-      desktopSize: 58,
-      mobileSize: 47,
-      mobileBreakpoint: 500,
-      gapPixels: 23,
-      hitPaddingPixels: 3,
-    },
-    feedback: { durationSeconds: 2.2 },
-    // Standard English Scrabble tile values. No board multipliers or bonuses.
-    letterPoints: {
-      A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1,
-      J: 8, K: 5, L: 1, M: 3, N: 1, O: 1, P: 3, Q: 10, R: 1,
-      S: 1, T: 1, U: 1, V: 4, W: 4, X: 8, Y: 4, Z: 10,
-    },
-  };
+  "timer": {
+    "startSeconds": 60,
+    "maxSeconds": 60,
+    "lowTimeSeconds": 15
+  },
+  "rules": {
+    "minWordLength": 3,
+    "nextLetterSeconds": 5
+  },
+  "combo": {
+    "enabled": true,
+    "wordsToStart": 3,
+    "maxGapSeconds": 8,
+    "extraSecondsPerWord": 0.25,
+    "maxExtraSeconds": 5
+  },
+  "wildcards": {
+    "chance": 0.05,
+    "openingTiles": 1
+  },
+  "opening": {
+    "desktopTiles": 14,
+    "mobileTiles": 16,
+    "maxHeightFraction": 0.88
+  },
+  "rewards": {
+    "secondsPerPoint": 1,
+    "threeLetterMultiplier": 0.1,
+    "threeLetterMaxSeconds": 0.5,
+    "fourLetterMultiplier": 0.25,
+    "fourLetterMaxSeconds": 2,
+    "longWordMultiplier": 1.5
+  },
+  "bonusLetters": {
+    "chance": 0.16,
+    "timeMultiplier": 2,
+    "color": "#efcf79",
+    "borderColor": "#b89a45"
+  },
+  "specialTiles": {
+    "warmupSeconds": 20
+  },
+  "hourglass": {
+    "enabled": true,
+    "minWordLength": 5,
+    "spawnChance": 0.3333333333333333,
+    "speedMultiplier": 1.8,
+    "durationSeconds": 5,
+    "timeScale": 0.4,
+    "color": "#bce2d6"
+  },
+  "smoke": {
+    "letterChance": 0.09,
+    "letterSpeedMultiplier": 1.8,
+    "durationSeconds": 5,
+    "patchCount": 4,
+    "radiusFraction": 0.27,
+    "opacity": 1,
+    "fadeInSeconds": 0.8,
+    "fadeOutSeconds": 1.2,
+    "enterSeconds": 1.1,
+    "exitSeconds": 1.2,
+    "driftPixelsPerSecond": 4,
+    "color": "#e891b0"
+  },
+  "penalties": {
+    "clearWordSeconds": 2,
+    "repeatWordSeconds": 2,
+    "invalidWordSeconds": 5
+  },
+  "falling": {
+    "pixelsPerSecond": 31.32,
+    "letterLimit": 26,
+    "visibleLetterTarget": 20,
+    "maxVisibleLetters": 48,
+    "replacementFadeSeconds": 0.14,
+    "minPixelsPerSecond": 29,
+    "maxPixelsPerSecond": 55,
+    "increasePerWord": 1.1,
+    "desktopSpawnSeconds": 0.54,
+    "mobileSpawnSeconds": 0.72
+  },
+  "letterFrequency": {
+    "A": 8.04,
+    "B": 1.48,
+    "C": 3.34,
+    "D": 3.82,
+    "E": 12.49,
+    "F": 2.4,
+    "G": 1.87,
+    "H": 5.05,
+    "I": 7.57,
+    "J": 0.16,
+    "K": 0.54,
+    "L": 4.07,
+    "M": 2.51,
+    "N": 7.23,
+    "O": 7.64,
+    "P": 2.14,
+    "Q": 0.12,
+    "R": 6.28,
+    "S": 6.51,
+    "T": 9.28,
+    "U": 2.73,
+    "V": 1.05,
+    "W": 1.68,
+    "X": 0.23,
+    "Y": 1.66,
+    "Z": 0.09
+  },
+  "celebration": {
+    "durationSeconds": 1.1,
+    "timerRefillSeconds": 0.65,
+    "scoreCountSeconds": 0.35
+  },
+  "wordAssist": {
+    "enabled": true,
+    "minPrefixLength": 4,
+    "chance": 0.35,
+    "lookAhead": 2,
+    "nextLetterDecay": 0.4
+  },
+  "rotation": {
+    "minDegreesPerSecond": 8,
+    "maxDegreesPerSecond": 32,
+    "randomDirection": true,
+    "maxInitialAngleDegrees": 6,
+    "respectReducedMotion": true,
+    "highValueMinPoints": 4,
+    "highValueSpinChance": 0.85,
+    "ordinarySpinChance": 0.12,
+    "secondaryAxisWeight": 0.35,
+    "rockDegrees": 7,
+    "restMinSeconds": 0.8,
+    "restMaxSeconds": 2.4
+  },
+  "physics": {
+    "collisionGap": 2,
+    "restitution": 0.08,
+    "lateralDamping": 2.6,
+    "fallRecovery": 2.2,
+    "solverIterations": 16,
+    "wallPadding": 6
+  },
+  "tiles": {
+    "color": "#fffef7",
+    "textColor": "#354a33",
+    "pointColor": "#70815a",
+    "borderColor": "#cbd3bb",
+    "hoverBorderColor": "#6f9143",
+    "desktopSize": 58,
+    "mobileSize": 47,
+    "mobileBreakpoint": 500,
+    "gapPixels": 23,
+    "hitPaddingPixels": 3
+  },
+  "feedback": {
+    "durationSeconds": 2.2
+  },
+  "letterPoints": {
+    "A": 1,
+    "B": 3,
+    "C": 3,
+    "D": 2,
+    "E": 1,
+    "F": 4,
+    "G": 2,
+    "H": 4,
+    "I": 1,
+    "J": 8,
+    "K": 5,
+    "L": 1,
+    "M": 3,
+    "N": 1,
+    "O": 1,
+    "P": 3,
+    "Q": 10,
+    "R": 1,
+    "S": 1,
+    "T": 1,
+    "U": 1,
+    "V": 4,
+    "W": 4,
+    "X": 8,
+    "Y": 4,
+    "Z": 10
+  },
+  "engagement": {
+    "selectionSeconds": 0.16,
+    "successSeconds": 0.28,
+    "discoverySeconds": 0.6,
+    "lowWarningCooldownSeconds": 12
+  }
+};
 
   function createConfig(overrides = {}) {
     const config = {};
@@ -229,6 +281,7 @@
     for (const key of ['desktopSize', 'mobileSize', 'mobileBreakpoint']) number('tiles', key, 0, true);
     for (const key of ['gapPixels', 'hitPaddingPixels']) number('tiles', key);
     number('feedback', 'durationSeconds');
+    for (const key of Object.keys(defaults.engagement)) number('engagement', key, 0, true);
     number('rules', 'nextLetterSeconds', 0, true);
     if (typeof config.combo.enabled !== 'boolean') throw new Error('config.js: combo.enabled must be true or false.');
     if (!Number.isInteger(config.combo.wordsToStart) || config.combo.wordsToStart < 1) throw new Error('config.js: combo.wordsToStart must be a positive integer.');

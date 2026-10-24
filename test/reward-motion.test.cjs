@@ -27,7 +27,7 @@ test('quick consecutive rewards accumulate without a visual jump and reset clear
 });
 
 test('capped rewards animate only credited time, including zero at a full clock',async()=>{
-  const {RewardMeters}=await modulePromise,game=new WordGame(['CATCH','SMILE']);game.start(0);
+  const {RewardMeters}=await modulePromise,game=new WordGame(['CATCH','SMILE'],{timer:{maxSeconds:120}});game.start(0);
   game.remaining=119;for(const letter of 'CATCH')game.select(letter,0);const first=game.submit(0);
   const m=new RewardMeters(game.config.celebration);m.add(first.reward,first.points);
   assert.equal(first.reward,1);near(m.values(game.remaining,game.score).time,119);

@@ -45,10 +45,9 @@ export async function createScene(host, config, reducedMotion) {
     specularStrength:key==='plum'?0:DESIGN.tile.specularStrength,shininess:DESIGN.tile.shininess,
   })]));
   const geometry = roundedSquare(config.tiles.mobileSize);
-  const sphere = new THREE.IcosahedronGeometry(1, 1);
   const shadowGeometry = new THREE.PlaneGeometry(80, 80);
   const textCache = new Map();
-  const bodies = new Map(), bursts = [], clouds = [];
+  const bodies = new Map(), transfers = [], clouds = [];
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
   const smoke = smokeMaterial();
   const cloudGeometry = new THREE.PlaneGeometry(1, 1);
@@ -109,6 +108,25 @@ export async function createScene(host, config, reducedMotion) {
     });
     const model = { group, halo, fades }; bodies.set(tile, model); return model;
   }
+  function removeBody(tile, model) {
+    scene.remove(model.group, model.halo);
+    for (const material of model.fades.values()) material.dispose();
+    bodies.delete(tile);
+  }
+  function removeTransfer(transfer) {
+    scene.remove(transfer.group);
+    for (const material of transfer.materials) material.dispose();
+  }
+  function clearTransfers() {
+    for (const transfer of transfers) removeTransfer(transfer);
+    transfers.length = 0;
+  }
+  function transferTarget(transfer) {
+    const kind = transfer.target === 'timer' ? 'hourglass' : 'letter';
+    return ui.selectionTarget?.(transfer.index, kind) || (kind === 'hourglass'
+      ? { x: layout.left + 320, y: layout.top + 87 }
+      : { x: layout.left + 55 + Math.min(transfer.index, 7) * 21, y: layout.height - layout.bottom - 117 });
+  }
   function resize(){
     const style=getComputedStyle(host);
     layout=viewportLayout(host.clientWidth,host.clientHeight,parseFloat(style.getPropertyValue('--safe-top'))||0,parseFloat(style.getPropertyValue('--safe-bottom'))||0);
@@ -122,7 +140,7 @@ export async function createScene(host, config, reducedMotion) {
 
   function render(tiles, game, dt, now, hover, view) {
     const visible = new Set(tiles);
-    for (const [tile, model] of bodies) if (!visible.has(tile)) { scene.remove(model.group, model.halo);for(const material of model.fades.values())material.dispose();bodies.delete(tile); }
+    for (const [tile, model] of bodies) if (!visible.has(tile)) removeBody(tile, model);
     for (const tile of tiles) {
       const model = bodies.get(tile) || build(tile);
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
@@ -142,11 +160,22 @@ export async function createScene(host, config, reducedMotion) {
         }
       }
     }
-    for (let i = bursts.length - 1; i >= 0; i--) {
-      const p = bursts[i]; p.life -= game.phase === 'paused' ? 0 : dt;
-      if (game.phase !== 'paused') p.mesh.position.addScaledVector(p.velocity, dt);
-      p.mesh.scale.setScalar(Math.max(0, p.life) * 4);
-      if (p.life <= 0) { scene.remove(p.mesh); bursts.splice(i, 1); }
+    for (let i = transfers.length - 1; i >= 0; i--) {
+      const transfer = transfers[i];
+      transfer.age += game.phase === 'running' ? dt : 0;
+      const progress = Math.min(1, transfer.age / transfer.duration);
+      if (progress >= 1) { removeTransfer(transfer); transfers.splice(i, 1); continue; }
+      const eased = 1 - (1 - progress) ** 3;
+      const destination = transferTarget(transfer);
+      const x = transfer.x + (destination.x - transfer.x) * eased;
+      const y = transfer.y + (destination.y - transfer.y) * eased - Math.sin(progress * Math.PI) * 8;
+      transfer.group.position.set(x - layout.width / 2, layout.height / 2 - y, 6);
+      transfer.group.scale.setScalar(1 - eased * .68);
+      transfer.group.rotation.x = transfer.rotation.x * (1 - eased);
+      transfer.group.rotation.y = transfer.rotation.y * (1 - eased);
+      transfer.group.rotation.z = transfer.rotation.z * (1 - eased);
+      const opacity = 1 - Math.max(0, (progress - .45) / .55);
+      for (const material of transfer.materials) material.uniforms.opacity.value = opacity;
     }
     const age = config.smoke.durationSeconds - game.effects.smoke;
     for (const cloud of clouds) {
@@ -167,6 +196,11 @@ export async function createScene(host, config, reducedMotion) {
   return {
     canvas, render, ui,
     get layout(){return layout;},
+    setReducedMotion(value) {
+      reducedMotion = Boolean(value);
+      if (reducedMotion) clearTransfers();
+      ui.setReducedMotion?.(reducedMotion);
+    },
     hit(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
       const x=(clientX-rect.left)/rect.width*layout.width,y=(clientY-rect.top)/rect.height*layout.height;
@@ -179,13 +213,33 @@ export async function createScene(host, config, reducedMotion) {
       for (const hit of hits) { let obj = hit.object; while (obj && !obj.userData.tile) obj = obj.parent; if (obj) return { tile: obj.userData.tile }; }
       return null;
     },
-    burst(tile) {
-      if (reducedMotion) return;
-      for (let i = 0; i < 7; i++) {
-        const mesh = new THREE.Mesh(sphere, materials[tile.bonus ? 'gold' : 'cream']);
-        mesh.position.set(tile.x-layout.width/2,layout.height/2-tile.y,5);
-        scene.add(mesh); bursts.push({ mesh, life: .5, velocity: new THREE.Vector3((Math.random()-.5)*95, 20+Math.random()*65, 0) });
+    burst(tile, { target = tile.kind === 'hourglass' ? 'timer' : 'tray', index = 0 } = {}) {
+      const model = bodies.get(tile);
+      if (!model) return;
+      // The real tile is consumed immediately. This copy has no collision or
+      // hit target, so feedback cannot delay input or intercept a second pick.
+      if (!reducedMotion) {
+        const group = model.group.clone(true), clonedMaterials = new Map();
+        group.userData = {};
+        group.traverse(object => {
+          if (!object.isMesh) return;
+          const source = object.material;
+          if (!clonedMaterials.has(source)) {
+            const material = source.clone();
+            material.transparent = true; material.depthWrite = false;
+            clonedMaterials.set(source, material);
+          }
+          object.material = clonedMaterials.get(source);
+        });
+        const requestedDuration = config.engagement?.selectionSeconds;
+        const duration = Number.isFinite(requestedDuration) ? Math.min(.4, Math.max(.08, requestedDuration)) : .16;
+        scene.add(group);
+        transfers.push({ group, materials: [...clonedMaterials.values()], x: tile.x, y: tile.y,
+          rotation: group.rotation.clone(), target, index: Math.max(0, Number(index) || 0), age: 0, duration });
+        // Bound decorative copies independently of the game's available tiles.
+        if (transfers.length > 8) removeTransfer(transfers.shift());
       }
+      removeBody(tile, model);
     },
     releaseSmoke() {
       for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0;
@@ -198,6 +252,6 @@ export async function createScene(host, config, reducedMotion) {
         scene.add(cloud);clouds.push(cloud);
       }
     },
-    reset() { ui.reset();for (const p of bursts) scene.remove(p.mesh); bursts.length = 0; for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
+    reset() { ui.reset();clearTransfers();for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
   };
 }

@@ -222,7 +222,7 @@ test('hourglasses enter above the top at a random horizontal position away from 
   assert.ok(Math.abs(open.x-195) > 47);
 });
 test('selecting a grenade letter immediately releases smoke and still spells and scores normally', () => {
-  const game = create();
+  const game = create({timer:{maxSeconds:120}});
   const result = game.select('C', 20000, {grenade:true, bonus:true});
   assert.equal(result.smokeTriggered, true);
   assert.equal(game.current, 'C');

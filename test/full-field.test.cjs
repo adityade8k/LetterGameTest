@@ -83,7 +83,8 @@ test('a blocked top entry keeps its replacement queued and never falls back to a
 
 test('opening handoff and later supply maintain coverage without a vertical gap or overlaps',async()=>{
   const {viewportLayout}=await layoutModule,{fieldPosition,openingFeed,streamLimit,spawnPosition}=await spawnModule,p=await physicsModule;
-  const c=createConfig(),size=c.tiles.mobileSize,layout=viewportLayout(360,640);
+  // Exercise the dense-supply preset explicitly rather than locking editable defaults.
+  const c=createConfig({falling:{mobileSpawnSeconds:.35},rotation:{minDegreesPerSecond:5.6,maxDegreesPerSecond:22.4}}),size=c.tiles.mobileSize,layout=viewportLayout(360,640);
   const incomingConfig={...c,falling:{...c.falling,letterLimit:streamLimit(layout,size,c)}};
   for(let seed=1;seed<=5;seed++){
     const random=rng(seed);let tiles=[],clock=0,maxGap=0,minVisible=Infinity;

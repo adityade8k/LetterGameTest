@@ -7,11 +7,11 @@ const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10
 test('rotation honors both speed bounds and can turn in either direction', () => {
   const { rotation } = createConfig();
   let values = [0, .1];
-  near(rotationSpeed(rotation, () => values.shift()), -radians(5.6));
+  near(rotationSpeed(rotation, () => values.shift()), -radians(rotation.minDegreesPerSecond));
   values = [1, .9];
-  near(rotationSpeed(rotation, () => values.shift()), radians(22.4));
+  near(rotationSpeed(rotation, () => values.shift()), radians(rotation.maxDegreesPerSecond));
   values = [.5, .1];
-  near(rotationSpeed(rotation, () => values.shift()), -radians(14));
+  near(rotationSpeed(rotation, () => values.shift()), -radians((rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2));
 });
 test('equal rotation limits give a fixed speed; zero disables rotation', () => {
   const fixed = createConfig({ rotation: { minDegreesPerSecond: 17, maxDegreesPerSecond: 17, randomDirection: false } });

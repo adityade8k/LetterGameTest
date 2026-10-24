@@ -61,7 +61,8 @@ test('dense supply reuses safe incoming space, keeps the population cap, and exc
 });
 
 test('constant dense supply sustains more choices through a minute without tile overlap',async()=>{
-  const c=createConfig(),p=await physics,{spawnPosition}=await spawning,random=rng(10);
+  // Density is a specific configurable preset, independent of the user's saved tuning.
+  const c=createConfig({falling:{mobileSpawnSeconds:.35},rotation:{minDegreesPerSecond:5.6,maxDegreesPerSecond:22.4}}),p=await physics,{spawnPosition}=await spawning,random=rng(10);
   let tiles=[],clock=0;const visible=[];
   for(let frame=0;frame<1800;frame++){
     p.stepTiles(tiles,1/30,{width:360,size:47,speed:c.falling.pixelsPerSecond,config:c,random});

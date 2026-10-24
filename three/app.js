@@ -4,6 +4,8 @@ import { prepareTile, settleTiles, stepTiles } from './physics.mjs';
 import { PrefixLetterSupply, FrequencyLetterSupply } from './letter-supply.mjs';
 import { spawnPosition, fieldPosition, openingFeed, streamLimit, DeferredRefills } from './spawn.mjs';
 import { exposedPosition, letterTarget } from './layout.mjs';
+import { ProgressStore, STORAGE_KEY } from '../progress.mjs';
+import { createAudio } from './audio.mjs';
 
 // Only the WebGL canvas is attached to the page. The interface and its hit
 // targets live in ui.js; the original dictionary and game rules stay shared.
@@ -13,33 +15,58 @@ const config=game.config,motion=LetterfallMotion;
 const refills=new DeferredRefills();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
-const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
+let reducedMotion=motionPreference.matches;
 const size=config.tiles.mobileSize;
 let width=DESIGN.width,height=DESIGN.height,layout;
 const tileShape={pitchOffset:DESIGN.tile.tiltX,yawOffset:DESIGN.tile.tiltY,halfDepth:DESIGN.tile.depth/2+DESIGN.tile.bevel+DESIGN.tile.letterDepth+2};
 const storageKey='letterfall.best.points.v2';
 let scene,tiles=[],spawnClock=0,hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
-let soundOn=false,audioContext,best=0,roundBest=0,resumeAfterMenu=false;
-const view={mode:'',collectionPage:0,feedback:'',feedbackKind:'',focus:'',hover:'',best:0,roundBest:0,soundOn:false};
+let best=0,roundBest=0,resumeAfterMenu=false,roundId='',activeOffset=0,bestChain=0,lastCheckpoint=0,lastLowWarning=-Infinity;
+const menuStack=[];
+let storage;
+try{storage=localStorage;}catch{/* Private browsers may deny storage access. */}
+const settings={effects:false,music:false,haptics:false,reducedMotion};
+try{const saved=JSON.parse(storage?.getItem('clttr.settings.v1')||'null');if(saved)for(const key of Object.keys(settings))if(typeof saved[key]==='boolean')settings[key]=saved[key];}catch{}
+reducedMotion=settings.reducedMotion;
+const audio=createAudio(settings);
+const ruleSignature=JSON.stringify(Object.fromEntries(Object.entries(config).filter(([key])=>!['feedback','celebration','engagement'].includes(key))));
+let ruleHash=2166136261;for(const char of ruleSignature)ruleHash=Math.imul(ruleHash^char.charCodeAt(0),16777619)>>>0;
+const progress=new ProgressStore(storage,{ruleVersion:`clttr-${ruleHash.toString(16)}`,dictionaryVersion:'bundled-english-v1'});
+const view={mode:'',collectionPage:0,feedback:'',feedbackKind:'',focus:'',hover:'',best:0,roundBest:0,soundOn:settings.effects,
+  settings,book:progress.snapshot(),roundSummary:null,wordbookFilter:'all',wordbookSort:'recent',wordbookQuery:'',wordbookPage:0,wordbookOnlyNew:false,wordDetail:'',menuReturn:'',statsView:'lifetime'};
 try{const saved=Number(localStorage.getItem(storageKey));if(Number.isSafeInteger(saved)&&saved>=0)best=saved;}catch{/* Storage is optional. */}
+best=progress.importBestScore(best);view.book=progress.snapshot();
 const format=value=>String(Number(value.toFixed(2)));
 function feedback(message,kind=''){
   view.feedback=message;view.feedbackKind=kind;feedbackUntil=performance.now()+config.feedback.durationSeconds*1000;
 }
-function tone(kind) {
-  if (!soundOn) return;
-  try {
-    audioContext ??= new (window.AudioContext || window.webkitAudioContext)();
-    void audioContext.resume().catch(() => {});
-    const notes = kind === 'word' ? [523,659,784] : kind === 'penalty' ? [196,147] : [370+game.current.length*35];
-    notes.forEach((frequency, i) => {
-      const oscillator = audioContext.createOscillator(), gain = audioContext.createGain(), at = audioContext.currentTime + i*.075;
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0,at); gain.gain.linearRampToValueAtTime(.055,at+.01); gain.gain.exponentialRampToValueAtTime(.001,at+.16);
-      oscillator.connect(gain); gain.connect(audioContext.destination); oscillator.start(at); oscillator.stop(at+.18);
-      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
-    });
-  } catch { /* Audio does not affect gameplay. */ }
+function refreshBook(){view.book=progress.snapshot();}
+function checkpoint(){
+  if(!roundId)return;
+  progress.setActiveSeconds(activeOffset+game.elapsed,{roundId,activeSeconds:game.elapsed});lastCheckpoint=game.elapsed;refreshBook();
+}
+function saveSettings(){
+  reducedMotion=settings.reducedMotion;audio.setSettings(settings);scene?.setReducedMotion(reducedMotion);
+  try{storage?.setItem('clttr.settings.v1',JSON.stringify(settings));}catch{}
+  void audio.unlock();
+}
+// Another tab may add words while this round is paused or a menu is open.
+// Refresh is read-only, so storage notifications cannot form a save loop.
+let storageRefresh;
+window.addEventListener('storage',event=>{
+  if(event.storageArea!==storage||!event.key?.startsWith(STORAGE_KEY))return;
+  clearTimeout(storageRefresh);
+  storageRefresh=setTimeout(()=>{
+    progress.refreshFromStorage();refreshBook();best=Math.max(best,view.book.stats.bestScore);
+    if(scene){sync();updateLabel();}
+  },60);
+});
+function finishRound(abandoned=false){
+  if(!roundId)return;
+  checkpoint();
+  view.roundSummary=progress.finishRound({roundId,score:game.score,activeSeconds:game.elapsed,bestChain,mistakes:game.mistakes,words:[...game.words],abandoned});
+  refreshBook();
 }
 function makeTile(letter, x, y,fade=false) {
   const blank=letter==='?',traits=blank?{bonus:false,grenade:false}:game.rollTileTraits();
@@ -106,13 +133,19 @@ function handle(result){
     if(result.hourglassOffered&&game.phase!=='over')offerHourglass();
     if(game.score>best){best=game.score;try{localStorage.setItem(storageKey,String(best));}catch{}}
     view.feedback='';view.feedbackKind='';feedbackUntil=0;
-    scene.ui.celebrate(result,game);tone('word');
+    const previousLongest=view.book.stats?.longestWord||'';
+    const discovery=progress.recordWord(result,{roundId,eventId:`${roundId}:${result.wordIndex}`,activeSeconds:result.activeSeconds});
+    bestChain=Math.max(bestChain,result.comboCount||0);refreshBook();
+    result.isNew=discovery.isNew;result.newWithoutBlanks=discovery.newWithoutBlanks;
+    result.isRecord=result.word.length>(typeof previousLongest==='string'?previousLongest.length:previousLongest.length||0);
+    result.milestone=discovery.milestone;
+    scene.ui.celebrate(result,game);audio.play('word',{length:result.word.length,isNew:result.isNew,isRecord:result.isRecord,blankCount:result.blankCount});
   }else if(result.type==='penalty'){
-    const reason={repeat:'Already collected',clear:'Word cleared',timeout:'Word timed out',spelling:'No word starts that way',incomplete:'Not a complete word'}[result.reason];
-    feedback(`${reason} / -${format(result.penalty)}s`,'bad');tone('penalty');
-  }else if(result.type==='effect'){feedback(`Slow time / ${format(result.duration)} seconds`,'slow');tone('word');}
-  else if(result.type==='letter')tone('letter');
-  if(result.smokeTriggered){scene.releaseSmoke();feedback(`Smoke screen / ${format(config.smoke.durationSeconds)} seconds`);}
+    const reason={repeat:'Already played this round',clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
+    feedback(`${reason} / -${format(result.penalty)}s`,'bad');audio.play('penalty');
+  }else if(result.type==='effect'){feedback(`Slow time / ${format(result.duration)} seconds`,'slow');audio.play('hourglass');}
+  else if(result.type==='letter')audio.play('letter',{length:game.current.length});
+  if(result.smokeTriggered){scene.releaseSmoke();audio.play('grenade');if(result.type!=='penalty')feedback(`Smoke screen / ${format(config.smoke.durationSeconds)} seconds`);}
   sync();
 }
 function visibleTiles(){return tiles.filter(tile=>exposedTile(tile)&&(tile.bornAt===undefined||game.elapsed-tile.bornAt>=config.falling.replacementFadeSeconds));}
@@ -122,19 +155,20 @@ function pick(tile){
   view.focus='';
   const result=tile.kind==='hourglass'?game.collectHourglass(performance.now()):game.select(tile.letter,performance.now(),tile);
   if(result.consumed!==false&&['letter','penalty','effect'].includes(result.type)){
-    tiles=tiles.filter(item=>item!==tile);scene.burst(tile);hover=null;
+    tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:tile.kind==='hourglass'?'timer':'tray',index:Math.max(0,game.current.length-1)});hover=null;
     if(tile.kind==='letter'&&game.phase==='running')refills.picked();
   }
   handle(result);refillChoices(true);updateLabel();
 }
 function sync(){
-  view.best=best;view.roundBest=roundBest;view.soundOn=soundOn;
+  view.best=best;view.roundBest=roundBest;view.soundOn=settings.effects;
   if(game.phase!==lastPhase){
     lastPhase=game.phase;
     if(game.phase==='over'){
-      tiles=tiles.filter(tile=>tile.kind!=='hourglass');scene?.reset();view.mode='over';view.focus='menu';
+      finishRound();tiles=tiles.filter(tile=>tile.kind!=='hourglass');scene?.reset();view.mode='over';view.focus='start';
     }
   }
+  audio.setActive(game.phase==='running'&&!view.mode);
   scene?.ui.sync(game,view);
 }
 function updateLabel(){
@@ -147,38 +181,79 @@ function updateLabel(){
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
+  if(roundId&&game.phase!=='over')finishRound(true);
   roundBest=best;game.start(performance.now());scene.reset();refills.reset();spawnClock=0;hover=null;updateLayout();seed();
-  Object.assign(view,{mode:'',focus:'',hover:'',collectionPage:0,feedback:'',feedbackKind:''});feedbackUntil=0;resumeAfterMenu=false;
+  roundId=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  activeOffset=view.book.stats?.activeSeconds||0;bestChain=0;lastCheckpoint=0;lastLowWarning=-Infinity;
+  progress.beginRound(roundId);refreshBook();
+  Object.assign(view,{mode:'',focus:'',hover:'',collectionPage:0,feedback:'',feedbackKind:'',roundSummary:null});feedbackUntil=0;resumeAfterMenu=false;menuStack.length=0;
   sync();updateLabel();scene.canvas.focus({preventScroll:true});
 }
 function togglePause(){
   if(game.phase==='running'){
     handle(game.pause(performance.now()));
-    if(game.phase==='paused'){view.mode='paused';view.focus='menu';}
+    checkpoint();if(game.phase==='paused'){view.mode='paused';view.focus='menu';}
   }else if(game.phase==='paused'){
     game.resume(performance.now());view.mode='';view.focus='';resumeAfterMenu=false;
   }
   sync();updateLabel();
 }
 function openMenu(mode){
-  resumeAfterMenu=game.phase==='running';
-  if(resumeAfterMenu)handle(game.pause(performance.now()));
-  if(game.phase==='over')return;
-  view.mode=mode;view.focus='menu';view.collectionPage=0;sync();updateLabel();
+  const shouldResume=game.phase==='running';
+  if(shouldResume)handle(game.pause(performance.now()));
+  checkpoint();
+  if(shouldResume&&game.phase==='over')return;
+  menuStack.push({mode:view.mode,resume:shouldResume});view.menuReturn=view.mode;
+  view.mode=mode;view.focus='';view.collectionPage=0;sync();updateLabel();
 }
 function closeMenu(){
-  view.mode='';view.focus='';if(resumeAfterMenu)game.resume(performance.now());resumeAfterMenu=false;sync();updateLabel();
+  const previous=menuStack.pop();
+  view.mode=previous?previous.mode:(game.phase==='over'?'over':game.phase==='paused'?'paused':'');view.focus='';
+  if(previous?.resume)game.resume(performance.now());
+  view.menuReturn=menuStack.at(-1)?.mode||'';sync();updateLabel();
+}
+function home(){
+  if(roundId&&game.phase!=='over')finishRound(true);
+  game.reset();roundId='';scene.reset();menuStack.length=0;resumeAfterMenu=false;
+  Object.assign(view,{mode:'',focus:'',hover:'',feedback:'',feedbackKind:''});
+  const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18]];
+  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
+  sync();updateLabel();
+}
+function queryInput(key){
+  if(key==='done'){closeMenu();return;}
+  if(key==='backspace')view.wordbookQuery=view.wordbookQuery.slice(0,-1);
+  else if(/^[A-Z]$/i.test(key)&&view.wordbookQuery.length<32)view.wordbookQuery+=key.toUpperCase();
+  view.wordbookPage=0;sync();updateLabel();
 }
 function act(action){
   scene.ui.press(action,performance.now());
   view.hover='';view.focus='';hover=null;
-  switch(action){
+  const [type,value]=action.split(':');
+  if(type==='book-filter'){view.wordbookFilter=value;view.wordbookPage=0;}
+  else if(type==='stats-view'){view.statsView=value;}
+  else if(type==='book-sort'){view.wordbookSort=value;view.wordbookPage=0;}
+  else if(type==='book-word'){view.wordDetail=value;openMenu('word-detail');return;}
+  else if(type==='setting'&&Object.hasOwn(settings,value)){settings[value]=!settings[value];saveSettings();}
+  else if(type==='goal'){progress.selectGoal(value==='none'?null:value);refreshBook();}
+  else if(type==='key'){queryInput(value);return;}
+  else switch(action){
     case 'start':case 'restart':begin();return;
-    case 'pause':togglePause();return;
+    case 'home':home();return;
+    case 'pause':case 'resume':togglePause();return;
     case 'submit':handle(game.submit(performance.now()));break;
     case 'undo':handle(game.undo(performance.now()));break;
-    case 'sound':soundOn=!soundOn;tone('letter');break;
-    case 'help':openMenu('help');return;
+    case 'sound':settings.effects=!settings.effects;saveSettings();audio.play('letter');break;
+    case 'help':case 'settings':case 'stats':case 'goals':openMenu(action);return;
+    case 'wordbook':
+      view.wordbookOnlyNew=false;view.wordbookPage=0;view.wordbookQuery='';view.wordbookFilter='all';openMenu('wordbook');return;
+    case 'results-new':
+      view.wordbookOnlyNew=true;view.wordbookPage=0;view.wordbookQuery='';view.wordbookFilter='all';openMenu('wordbook');return;
+    case 'book-query':openMenu('search');return;
+    case 'book-clear-query':view.wordbookQuery='';view.wordbookPage=0;break;
+    case 'book-prev':view.wordbookPage=Math.max(0,view.wordbookPage-1);break;
+    case 'book-next':view.wordbookPage=Math.min((scene.ui.wordbookPages?.()||1)-1,view.wordbookPage+1);break;
+    case 'book-back':closeMenu();return;
     case 'collection':if(game.wordCount)openMenu('collection');return;
     case 'previous':view.collectionPage=Math.max(0,view.collectionPage-1);view.focus='previous';break;
     case 'next':view.collectionPage=Math.min(scene.ui.collectionPages()-1,view.collectionPage+1);view.focus='next';break;
@@ -190,13 +265,17 @@ function act(action){
   sync();updateLabel();
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.phase==='running')togglePause();});
+window.addEventListener('pagehide',()=>checkpoint());
+motionPreference.addEventListener?.('change',event=>{settings.reducedMotion=event.matches;saveSettings();});
 window.addEventListener('keydown',event=>{
   if(!scene||event.ctrlKey||event.metaKey||event.altKey)return;
+  void audio.unlock();
+  if(view.mode==='search'&&(/^[a-z]$/i.test(event.key)||event.key==='Backspace'||event.key==='Enter')){event.preventDefault();queryInput(event.key==='Backspace'?'backspace':event.key==='Enter'?'done':event.key);return;}
   if(event.key==='Tab'){
     event.preventDefault();view.focus=scene.ui.focusNext(view.focus,event.shiftKey?-1:1);scene.canvas.focus({preventScroll:true});sync();updateLabel();return;
   }
   if(event.key==='Escape'){
-    event.preventDefault();if(['help','collection'].includes(view.mode))closeMenu();else if(game.phase!=='over')togglePause();return;
+    event.preventDefault();if(view.mode&&view.mode!=='paused'&&view.mode!=='over')closeMenu();else if(game.phase!=='over')togglePause();return;
   }
   if(event.key==='Enter'||event.key===' '){
     event.preventDefault();
@@ -220,7 +299,7 @@ try{
   updateLayout();
   scene.canvas.addEventListener('pointerdown',event=>{
     if(event.button!==0)return;
-    event.preventDefault();scene.canvas.focus({preventScroll:true});view.focus='';
+    event.preventDefault();void audio.unlock();scene.canvas.focus({preventScroll:true});view.focus='';
     const hit=scene.hit(event.clientX,event.clientY);
     if(hit?.action)act(hit.action);else if(hit?.tile)pick(hit.tile);
   });
@@ -231,7 +310,7 @@ try{
   });
   scene.canvas.addEventListener('pointerleave',()=>{hover=null;view.hover='';});
   scene.canvas.addEventListener('blur',()=>{view.focus='';});
-  scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score is saved.');});
+  scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score and saved Wordbook are safe.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
   tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
@@ -239,6 +318,8 @@ try{
   function frame(now){
     const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));
     if(game.phase==='running'){
+      if(game.elapsed-lastCheckpoint>=10)checkpoint();
+      if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){audio.play('lowtime');lastLowWarning=game.elapsed;}
       const worldDt=dt*game.timeScale;
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion});
       if(tiles.some(tile=>tile.kind==='hourglass'&&tile.y>=height+size))game.discardHourglass();

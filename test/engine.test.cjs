@@ -25,7 +25,7 @@ test('CATQ automatically loses five seconds and clears the spelling', () => {
   assert.equal(game.score, 0);
 });
 test('new words earn full letter points with length-based time and can enter overtime', () => {
-  const game = create();
+  const game = create({timer:{maxSeconds:120}});
   spell(game, 'CAT', 10000);
   assert.equal(game.submit(10000).reward, .5);
   assert.equal(game.remaining, 50.5);
@@ -39,7 +39,7 @@ test('new words earn full letter points with length-based time and can enter ove
   assert.equal(game.wordCount, 3);
 });
 test('repeat submissions lose time without adding another point', () => {
-  const game = create();
+  const game = create({timer:{maxSeconds:120}});
   spell(game, 'CAT'); game.submit(0);
   spell(game, 'CAT', 1000);
   assert.equal(game.current, 'CAT');
@@ -206,8 +206,8 @@ test('rare ordinary letters still obey the three- and four-letter base time caps
 });
 
 
-test('default overtime banks rewards up to 200 percent, then drains and restarts normally',()=>{
-  const game=create();
+test('configured overtime banks rewards up to 200 percent, then drains and restarts normally',()=>{
+  const game=create({timer:{maxSeconds:120}});
   assert.equal(game.remaining,60);assert.equal(game.config.timer.maxSeconds,120);
   for(const word of ['CATCH','SMILE','STARE','FLOWER']){spell(game,word);game.submit(0);}
   assert.equal(game.remaining,114);

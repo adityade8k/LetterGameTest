@@ -15,23 +15,23 @@ The game uses a fixed **portrait 9:16 frame**, sized to fit the available phone 
 ## Controls
 
 - Tap a tile to pick its letter. Tap the word tray to submit. Every visible control is a raycast target in the Three.js scene.
-- Tap Undo to clear the whole word for a two-second penalty.
+- Tap Clear to discard the whole word for a two-second penalty.
 - Tap Pause to stop the clock, effects, and letters. Switching away from the page also pauses automatically.
 - Tap the collected-word strip to open its paginated collection. The round pauses while this panel is open and resumes when it closes.
 - Letter keys pick the lowest fully visible matching letter. **? / \*** picks a visible blank. **Enter** submits, **Backspace** clears, **1** collects a visible hourglass, and **Escape** pauses/resumes or closes help/collection.
 - **Tab / Shift+Tab** cycle the available Three.js controls. A small gold marker shows focus. **Enter / Space** activate the focused control. Enter also starts the ready screen. With no control focused, Space pauses a running round.
-- Sound starts off. The sound control is in the main menu, beside How to play. It is absent during a round.
+- Sound starts off. Settings offers separate sound effects, ambient music, haptics, and reduced-motion controls. Settings can also be opened while paused.
 
 The single canvas has a descriptive accessibility label reflecting the current word, visible letters, effects, menus, and keyboard focus. There are no invisible HTML buttons underlying the meshes.
 
 ## Rules
 
-- Start with **60 seconds** and bank earned time up to **120 seconds (200%)**. Above 60 seconds, the timer shows an overtime percentage and a gold second fill. The clock drains normally back through the standard fill.
+- Start with **60 seconds**, with earned time capped at **60 seconds** under the current tuning. The renderer also supports an overtime layer if `timer.maxSeconds` is later raised. This update preserves every pre-existing configuration value and fills in missing keys needed by the current engine.
 - Make new English words of **3 or more letters**. Each word earns the sum of its standard English **Scrabble letter points**; these values appear on the tiles.
 - **Blank wildcards** represent any one letter and earn **zero points**. There is no letter picker: a selected blank appears as `?`, and submission resolves the whole pattern to an unused dictionary word. Blanks work at any position, and several can occur in one word. All interpretations remain available as more letters are added. If several unused words match, common English letters at the blank positions are favored; the actual word is added to the collection. If every complete match was already used, the normal repeat penalty applies. An impossible pattern still fails immediately. Time rewards and collection scores use only the points actually earned, including any normal gold-letter time bonus.
 - **Three-letter words:** 0.1 seconds per point, capped at **0.5 seconds** of ordinary time. **Four letters:** 0.25 seconds per point, capped at **2 seconds**. **Five or more letters:** **1.5 seconds per point**. Gold time is added after the short-word cap.
 - A repeated submission costs **2 seconds**. An impossible prefix or an incomplete submitted word costs **5 seconds**. Both clear the current word without reducing earned points. A used word may still be extended before submitting: CAT can become CATCH.
-- Undo clears the whole word for **2 seconds**. Empty undo does nothing. Selected tiles stay consumed.
+- Clear discards the whole word for **2 seconds**. Clearing an empty word does nothing. Selected tiles stay consumed.
 - After each letter (including a blank), the letter countdown starts at **5 clock seconds**. On expiry, a **valid unused word automatically submits** with its normal points and time reward. An unfinished word is discarded for **2 seconds**; a repeated complete word gets the normal repeat penalty. Each outcome happens once. You can still tap to submit sooner or pick another letter to reset the countdown. A thin meter shows the remaining window. Pauses freeze it; hourglasses slow it to 40% speed alongside the round clock. A fresh 5-second letter window with a fresh 5-second hourglass lasts 8 real active seconds: it spends 2 clock seconds during the effect, then the remaining 3 at normal speed. Tune `rules.nextLetterSeconds` to change the base window.
 - No validity highlight, reward preview, or repeat warning appears before submission. The tray shows the letters, a neutral automatic-submission prompt, and the countdown meter. Impossible prefixes still fail immediately.
 - Missing a falling tile carries no penalty. At zero, the round ends. The high score is the highest total letter points, saved in the browser; the collected-word count remains separate.
@@ -61,7 +61,7 @@ The Three.js game keeps a **constant 31.32 logical pixels/second** falling pace 
 
 Replenishment stays **one pick behind**: the first selection leaves a gap, and the second and later selections can each release one replacement **above the top edge**. Replacements fall into view at the normal configured speed. Nothing materializes in the middle of the play area or at a cleared tile position. If the top is crowded or the population budget is full, the replacement stays queued until there is safe entry space. Only the initial board is scattered within the field. At round start, additional staggered letters are already traveling behind the header, connecting that opening board to the incoming stream without an empty vertical stretch.
 
-Every **0.35 seconds**, supply attempts one collision-safe top entry, also servicing any queued replacement. It does not bundle several maintenance letters into rows. The opening targets **20 exposed letters**; the later visible count varies as tiles are selected, fall behind the panels, or enter from above. Replacements use the current spelling's letter probabilities. The population budget covers the whole travel distance, including tiles behind both panels (55 letters for the default frame), and excludes hourglasses. This keeps arrivals flowing while older tiles leave. Top-entry clearance and the contact solver prevent overlaps.
+Every **0.72 seconds**, supply attempts one collision-safe top entry, also servicing any queued replacement. It does not bundle several maintenance letters into rows. The opening targets **20 exposed letters**; the later visible count varies as tiles are selected, fall behind the panels, or enter from above. Replacements use the current spelling's letter probabilities. The population budget covers the whole travel distance, including tiles behind both panels (55 letters for the default frame), and excludes hourglasses. This keeps arrivals flowing while older tiles leave. Top-entry clearance and the contact solver prevent overlaps.
 
 Unassisted spawns use normalized English text frequencies from [Peter Norvig’s Google Books analysis](https://www.norvig.com/mayzner.html): common letters such as E, T, A, O, I, and N appear more often; rare letters remain possible. This replaces both the short-word bag and the old letter string. There is no forced word completion. `letterFrequency` in `config.js` contains all 26 editable weights. They affect supply only, not Scrabble scores.
 
@@ -71,9 +71,27 @@ Before the fourth selection, all new letters use these frequencies. At four lett
 
 Submitting a new valid word shows small **+points** and **+seconds** labels inside the header, beside the score and clock. They rise only two logical pixels and fade out after 1.1 seconds. There are no large cards, word banners, confetti, cross-screen flights, or bouncing counters. The score counts up smoothly, and the timer refills with a subdued highlight, including its gold overtime layer. The playfield stays clear.
 
-These are Three.js meshes with cached geometry, not HTML overlays. The old success-status sentence above the word tray is gone. Penalty and effect explanations remain. Rewards apply to the real game immediately; only the displayed meters animate. Time labels show the amount actually credited, so reaching the 120-second cap cannot imply extra banked time. A full clock shows **MAX** instead of a false gain.
+These are Three.js meshes with cached geometry, not HTML overlays. The old success-status sentence above the word tray is gone. Penalty and effect explanations remain. Rewards apply to the real game immediately; only the displayed meters animate. Time labels show the amount actually credited, so reaching the configured time cap cannot imply extra banked time. A full clock shows **MAX** instead of a false gain.
 
 Animations freeze while paused and clear on restart/game over. Consecutive rewards update the same label positions instead of stacking; all points and time are still credited. Reduced-motion mode uses stationary fading labels. `celebration` in `config.js` controls label duration, score-count time, and refill time.
+
+## Discoveries and personal progress
+
+Every accepted spelling is saved immediately to a persistent **Wordbook** on this browser and origin. A word can score once per round, and familiar words can be played again in later rounds. “NEW” means the first time that exact spelling has been recorded on this device. A wildcard discovery is included in the Wordbook; it is marked as played without a wildcard only after a later unassisted play.
+
+The Wordbook supports length filters, alphabetical/recent/most-played sorting, search with a mesh keyboard or physical keyboard, pagination, and individual word histories. Entries show first/last play dates, play count, best word score, and whether the word has been played without a wildcard. The supplied dictionary has no definitions; the interface does not invent them.
+
+Round results show score, personal best, newly discovered words, the longest word, and a selected collection goal. Players can replay, inspect just the new words, or return home. Goals are optional and have no daily deadline or loss penalty. Lifetime progress includes distinct discoveries by word length; Recent play shows distinct unassisted five-, six-, and seven-letter words in the latest 20 minutes of active play. The window grows as active time accumulates and excludes pauses. Rule/dictionary changes start a fresh comparable window without deleting the Wordbook.
+
+**Community comparison is unavailable until real player data exists.** The local rank calculation accepts only verified, stable, sufficiently populated matching cohorts and complete observation windows. Nothing sends player data to a server. Do not display estimated percentiles or infer general vocabulary ability from game performance. A production leaderboard still needs consent, account identity, a backend, server validation, and real comparison cohorts.
+
+`progress.mjs` saves compact, immutable journal records under `clttr.progress.v1` keys and can recover earlier versioned snapshots and backup copies. Unique event IDs prevent duplicate submissions; separate operation keys preserve discoveries from concurrent tabs. New browser history is journal-first, so accepted words do not rewrite the entire collection. Storage adapters without key enumeration retain the snapshot-and-backup fallback. Legacy best scores are imported from `letterfall.best.points.v2`. Storage failures keep play working and display an explicit session-only notice. Settings use `clttr.settings.v1`. Browser storage can be cleared and is not an account backup; different ports/domains have separate collections.
+
+## Responsive feedback and comfort
+
+Selected tiles take a short, non-interactive trip into the tray; hourglasses travel toward the timer. Accepted words receive a brief acknowledgement, with a longer accent for a first discovery or personal record. Small NEW tags, chain progress, and optional goal progress connect a round to the collection. Score and time rewards still apply immediately. No new reward multipliers, validity hints, input delays, or game-clock changes are introduced.
+
+`three/audio.mjs` synthesizes soft selection, word, discovery, penalty, hourglass, grenade, and low-time cues. Sound unlocks only after an input gesture. Effects, ambient music, and supported-device haptics have independent controls; pause and mute cancel pending audio. Low-time cues have a cooldown. Reduced motion follows the device preference initially and can be changed in Settings; it suppresses decorative transfer/pulse movement without changing game physics or smoke opacity.
 
 ## Experimental word extension help
 
@@ -109,8 +127,9 @@ Edit **`config.js`**, save, and refresh. Its comments explain the settings, unit
 | `tiles.mobileSize`, `tiles.gapPixels` | Tile size and supply spacing |
 | `letterPoints` | Per-letter score values |
 | `feedback.durationSeconds` | Feedback visibility duration |
+| `engagement` | Selection transfer, word acknowledgement, discovery accent, and low-time sound cooldown |
 
-Three.js falling speed stays at `falling.pixelsPerSecond` (31.32 by default), regardless of how long the round lasts or how many words are collected. Letter supply uses a 0.35-second opportunity interval, constrained by the population cap and available top-entry space. Countdown and effect durations keep their existing time scale. Rotation limits remain 5.6–22.4 degrees per second. Set both rotation limits to zero to stop rotation, or to the same value for a fixed turning speed. The legacy min/max/increase-per-word fields only affect the archived p5 prototype.
+Three.js falling speed stays at `falling.pixelsPerSecond` (31.32 by default), regardless of how long the round lasts or how many words are collected. Letter supply uses the preserved 0.72-second mobile opportunity interval, constrained by the population cap and available top-entry space. Countdown and effect durations keep their existing time scale. Rotation limits remain at the preserved 8–32 degrees per second. Set both rotation limits to zero to stop rotation, or to the same value for a fixed turning speed. The legacy min/max/increase-per-word fields only affect the archived p5 prototype.
 
 By default, 85% of letters worth at least four points make intermittent 150–240° turns that emphasize Y and also tilt on X and Z. 12% of other letters tumble with Z dominant. Each tile gets its own axis mix; the combined rotation speed stays within its speed limit. `rotation.secondaryAxisWeight` controls the secondary turns (0 restores single-axis rotation). Both faces carry correctly oriented letters, scores, and special markings. High-value tiles use the upper half of the configured speed range. Other tiles gently rock; turns pause for 0.8–2.4 seconds. Minimum and maximum values are validated. Three.js motion uses logical pixels per second, so changing the viewport does not change difficulty.
 
@@ -132,7 +151,9 @@ The Three.js version uses projected oriented-box collision detection with a two-
 - `three/icons.js`: one consistent set of modeled arrows, Undo, pause, audio, hourglass, and grenade icons.
 - `three/scene.js`: actual extruded tile/letter geometry, modeled icons, shared geometry, particles, full-field rendering, raycasting, and moving smoke.
 - `three/ui.js`: mesh text, modeled controls, timer, menus, collection pagination, keyboard-focus marker, and UI raycasts. Text is extruded font geometry, not a bitmap or HTML texture. Beveled plinths, layered button caps, soft contact shadows, and a recessed timer give the interface depth. CLTTR sits at the top, the timer directly beneath it, then the falling field. The former top slogan and gameplay footer are removed.
-- `three/app.js`: input and round presentation; it reuses the original pure rule engine.
+- `three/app.js`: input, round presentation, settings, audio, and collection integration; it reuses the original pure rule engine.
+- `progress.mjs`: local discoveries, goals, round summaries, recent-play measurements, and conservative community-rank validation.
+- `three/audio.mjs`: gesture-unlocked synthesized sound, ambient audio, and optional haptics.
 - `three/style.css`: only canvas sizing and page placement. No game graphics are styled with CSS.
 
 The references were sampled with equal per-image weight after excluding edge UI. Their overall mean is **#EEB18A**. Color-family means are cream **#FAE7B5**, peach **#F59C81**, muted plum **#8E6D73**, and mint **#A8D8AC**. The final plum pair is darker for readability. See **`three/palette-analysis.json`** for the sampling method, per-reference means, and supplied swatches. The art itself is generated with geometry and shaders; the reference images are not included as game assets.
@@ -152,6 +173,6 @@ The references were sampled with equal per-image weight after excluding edge UI.
 npm test
 ```
 
-The 119 automated tests cover dictionary and wildcard resolution, unused-match preference, zero-point blank rewards, ambiguous-prefix continuation, repeats and penalties, time caps, gold, pause/restart, warm-up and special effects, side-entering smoke, English frequencies and word assistance, opening guarantees, portrait-world bounds, delayed top-entry replenishment across both picks and maintenance, blocked-entry queuing, continuous coverage through the opening handoff, automatic word submission, per-letter expiry and reset, capped combo growth and resets, late-input races, paused deadlines, hourglass-scaled letter deadlines and effect-expiry integration, collision safety, rotation, and quiet reward animations.
+The automated tests cover dictionary and wildcard resolution, unused-match preference, zero-point blank rewards, ambiguous-prefix continuation, repeats and penalties, time caps, gold, pause/restart, warm-up and special effects, side-entering smoke, English frequencies and word assistance, opening guarantees, portrait-world bounds, delayed top-entry replenishment across both picks and maintenance, blocked-entry queuing, continuous coverage through the opening handoff, automatic word submission, per-letter expiry and reset, capped combo growth and resets, late-input races, paused deadlines, hourglass-scaled letter deadlines and effect-expiry integration, collision safety, rotation, and quiet reward animations. Engagement tests cover accepted-event metadata, discovery deduplication and recovery, concurrent-tab persistence, wildcard provenance, recent-play windows, goal completion, score migration, audio cancellation, reduced motion, and mesh-menu controls.
 
 Browser validation checks the centered portrait frame on phone and desktop, mesh button raycasts, keyboard focus, wildcard submission and scoring, replenishment, Undo, menus, collection, moving smoke, and the absence of HTML interface elements. A WebGL-capable modern browser is required.
