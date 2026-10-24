@@ -66,7 +66,7 @@
     rollTileTraits(random = Math.random) {
       return {
         bonus: random() < this.config.bonusLetters.chance,
-        grenade: this.specialTilesUnlocked && random() < this.config.smoke.letterChance,
+        grenade: false, // Retained for older renderers; letters never carry smoke bombs.
       };
     }
     pointsFor(word) { return [...word.toUpperCase()].reduce((sum, letter) => sum + (this.config.letterPoints[letter] || 0), 0); }
@@ -162,11 +162,14 @@
       if (effect === 'hourglass') this.discardHourglass();
       return { type: 'effect', effect, duration };
     }
-    collectHourglass(now) {
+    collectHourglass(now) { return this.collectPickup('hourglass', now); }
+    collectPickup(effect, now) {
       const end = this.advance(now);
       if (end) return { ...end, consumed: false };
-      if (this.phase !== 'running' || !this.hourglassOffer) return { type: 'ignored' };
-      return this.activate('hourglass', now);
+      if (this.phase !== 'running' || !this.hourglassOffer || !['hourglass', 'smoke'].includes(effect)) return { type: 'ignored' };
+      const result = this.activate(effect, now);
+      if (result.type === 'effect') { this.discardHourglass(); result.consumed = true; }
+      return result;
     }
     select(letter, now, options = {}) {
       const end = this.advance(now);
@@ -179,18 +182,12 @@
       }
       this.current += symbol;
       this.currentPrefixes=next;
-      this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:!blank && options.grenade===true });
+      this.currentTiles.push({ letter:symbol, blank, bonus:!blank && options.bonus===true, grenade:false });
       // Honor the window earned when this letter is selected, even if the
       // chain expires mid-countdown. The following pick uses the current boost.
       this.letterWindow = this.nextLetterWindow;
       this.letterSeconds = this.letterWindow;
       const result = next.length ? { type: 'letter', word: this.current } : this.penalize('spelling');
-      // Using a marked letter releases smoke even if it creates a bad prefix.
-      // It cannot revive effects after a penalty ends the round.
-      if (!blank && options.grenade === true && this.phase === 'running') {
-        this.effects.smoke = this.config.smoke.durationSeconds;
-        result.smokeTriggered = true;
-      }
       return result;
     }
     submit(now) {

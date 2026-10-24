@@ -143,9 +143,11 @@ function handle(result){
   }else if(result.type==='penalty'){
     const reason={repeat:'Already played this round',clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
     feedback(`${reason} / -${format(result.penalty)}s`,'bad');audio.play('penalty');
-  }else if(result.type==='effect'){feedback(`Slow time / ${format(result.duration)} seconds`,'slow');audio.play('hourglass');}
+  }else if(result.type==='effect'){
+    if(result.effect==='smoke'){scene.releaseSmoke();feedback(`Smoke screen / ${format(result.duration)} seconds`);audio.play('grenade');}
+    else{feedback(`Slow time / ${format(result.duration)} seconds`,'slow');audio.play('hourglass');}
+  }
   else if(result.type==='letter')audio.play('letter',{length:game.current.length});
-  if(result.smokeTriggered){scene.releaseSmoke();audio.play('grenade');if(result.type!=='penalty')feedback(`Smoke screen / ${format(config.smoke.durationSeconds)} seconds`);}
   sync();
 }
 function visibleTiles(){return tiles.filter(tile=>exposedTile(tile)&&(tile.bornAt===undefined||game.elapsed-tile.bornAt>=config.falling.replacementFadeSeconds));}
@@ -153,9 +155,11 @@ function pick(tile){
   if(game.phase!=='running'||view.mode)return;
   if(tile.bornAt!==undefined&&game.elapsed-tile.bornAt<config.falling.replacementFadeSeconds)return;
   view.focus='';
-  const result=tile.kind==='hourglass'?game.collectHourglass(performance.now()):game.select(tile.letter,performance.now(),tile);
+  const effect=tile.kind==='hourglass'?scene.pickupEffect(tile):null;
+  if(tile.kind==='hourglass'&&!effect)return;
+  const result=tile.kind==='hourglass'?game.collectPickup(effect,performance.now()):game.select(tile.letter,performance.now(),tile);
   if(result.consumed!==false&&['letter','penalty','effect'].includes(result.type)){
-    tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:tile.kind==='hourglass'?'timer':'tray',index:Math.max(0,game.current.length-1)});hover=null;
+    tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:tile.kind==='hourglass'?(effect==='smoke'?'smoke':'timer'):'tray',index:Math.max(0,game.current.length-1)});hover=null;
     if(tile.kind==='letter'&&game.phase==='running')refills.picked();
   }
   handle(result);refillChoices(true);updateLabel();
@@ -174,10 +178,10 @@ function sync(){
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
-  const letters=visibleTiles().map(tile=>tile.kind==='hourglass'?'hourglass pickup':tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.bonus?' (gold)':''}${tile.grenade?' (grenade)':''}`).join(', ');
+  const letters=visibleTiles().map(tile=>tile.kind==='hourglass'?`two-sided pickup (${scene.pickupEffect(tile)==='hourglass'?'hourglass facing':scene.pickupEffect(tile)==='smoke'?'smoke bomb facing':'edge-on'})`:tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.bonus?' (gold)':''}`).join(', ');
   const effects=`${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
-  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; 1 collects a visible hourglass; Escape pauses or resumes.`;
+  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; 1 collects the facing side of a visible two-sided pickup; Escape pauses or resumes.`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){

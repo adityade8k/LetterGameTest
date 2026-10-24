@@ -19,7 +19,7 @@ test('long crowded simulations keep rotated squares apart and inside side walls'
  p.settleTiles(tiles,360,47,c.physics);
  let worst=0;
  for(let frame=0;frame<1800;frame++){
-  if(frame%26===0){const column=frame%5;const x=36+column*70;if(!tiles.some(t=>Math.abs(t.x-x)<55&&t.y<90)){const t=tile(p,c,x,-50,'Z',0,random);t.grenade=true;tiles.push(t);}}
+  if(frame%26===0){const column=frame%5;const x=36+column*70;if(!tiles.some(t=>Math.abs(t.x-x)<55&&t.y<90)){const t=tile(p,c,x,-50,'Z',0,random);t.kind='hourglass';tiles.push(t);}}
   p.stepTiles(tiles,1/30,{width:360,size:47,speed:50,config:c,random});tiles=tiles.filter(t=>t.y<410);
   for(let i=0;i<tiles.length;i++){
    const t=tiles[i],half=p.projectedHalfSize(t,47,c.physics.collisionGap);
@@ -30,8 +30,8 @@ test('long crowded simulations keep rotated squares apart and inside side walls'
  }
  assert.ok(worst<.05,`Visible overlap reached ${worst} logical pixels`);
 });
-test('physics substeps do not allow a fast marked letter to pass through another',async()=>{
- const p=await physics,c=createConfig(),random=rng(33),a=tile(p,c,180,50,'Q',.2,random),b=tile(p,c,182,110,'E',-.1,random);a.grenade=true;
+test('physics substeps do not allow a fast two-sided pickup to pass through another',async()=>{
+ const p=await physics,c=createConfig(),random=rng(33),a=tile(p,c,180,50,'Q',.2,random),b=tile(p,c,182,110,'E',-.1,random);a.kind='hourglass';a.rotationSpeed=c.hourglass.rotationDegreesPerSecond*Math.PI/180;
  for(let i=0;i<250;i++){
   p.stepTiles([a,b],.05,{width:360,size:47,speed:55,config:c,random});
   assert.equal(p.contact(a,b,47),null);
@@ -59,7 +59,7 @@ test('invalid physical tuning and turn probabilities are rejected',()=>{
  assert.throws(()=>createConfig({rotation:{restMinSeconds:4,restMaxSeconds:1}}));
 });
 
-test('letter, multiplier, grenade and score zones retain clear separation',async()=>{
+test('letter, multiplier and score zones retain clear separation',async()=>{
  const {tileLayout}=await import('../three/tile-layout.mjs');
  for(const size of [35,47,58,72]){
   const zones=Object.values(tileLayout(size));

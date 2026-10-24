@@ -20,37 +20,41 @@
     return best;
   }
   function smokePatches(width, height, settings, random = Math.random) {
-    const patches=[],short=Math.min(width,height),firstSide=random()<.5?-1:1;
+    const patches=[],short=Math.min(width,height);
+    // Give each cloud a different size band, then shuffle the bands so the
+    // largest obstruction does not keep occupying the first sampled location.
+    const sizeBands=Array.from({length:settings.patchCount},(_,index)=>index);
+    for(let index=sizeBands.length-1;index>0;index--){
+      const swap=Math.min(index,Math.floor(random()*(index+1)));
+      [sizeBands[index],sizeBands[swap]]=[sizeBands[swap],sizeBands[index]];
+    }
     for(let index=0;index<settings.patchCount;index++){
+      const radius=settings.radiusFraction*(.64+.70*(sizeBands[index]+random())/settings.patchCount);
       let best,clearance=-Infinity;
-      // Free placement with spaced centers, rather than the same four quadrants.
+      // In-field anchors favor different exposed regions, without fixed
+      // quadrants or offscreen entry/exit paths. UI is drawn above the smoke.
       for(let attempt=0;attempt<24;attempt++){
-        const candidate={x:.12+.76*((random()+attempt*.618034)%1),y:.12+.76*((random()+attempt*.754878)%1)};
+        const candidate={x:.14+.72*((random()+attempt*.618034)%1),y:.20+.54*((random()+attempt*.754878)%1)};
         const nearest=patches.reduce((distance,p)=>Math.min(distance,Math.hypot((p.x-candidate.x)*width/short,(p.y-candidate.y)*height/short)),Infinity);
         if(nearest>clearance){best=candidate;clearance=nearest;}
         if(nearest>=settings.radiusFraction*1.5)break;
       }
-      patches.push({...best,radius:settings.radiusFraction*(.84+random()*.3),phase:random()*Math.PI*2,
-        seed:random()*1000,aspect:.85+random()*.3,delay:random()*.12,
-        side:index%2?-firstSide:firstSide,exitSide:random()<.8?(index%2?-firstSide:firstSide):(index%2?firstSide:-firstSide),
-        entryY:Math.max(.05,Math.min(.95,best.y+(random()-.5)*.3)),exitY:Math.max(.05,Math.min(.95,best.y+(random()-.5)*.3))});
+      patches.push({...best,radius,phase:random()*Math.PI*2,
+        seed:random()*1000+index*.731,aspect:.73+random()*.62,delay:random()*.12});
     }
     return patches;
   }
   function smokePose(patch,age,remaining,width,height,settings,reducedMotion=false){
-    const smooth=value=>{const t=Math.min(1,Math.max(0,value));return t*t*(3-2*t);};
     const localAge=Math.max(0,age-patch.delay),diameter=Math.min(width,height)*patch.radius*2;
-    const enter=smooth(localAge/settings.enterSeconds),leave=smooth(1-remaining/settings.exitSeconds);
-    const drift=reducedMotion?0:settings.driftPixelsPerSecond*localAge;
-    const targetX=patch.x*width+Math.sin(localAge*.65+patch.phase)*drift;
-    const targetY=patch.y*height+Math.cos(localAge*.45+patch.phase)*drift;
-    const outside=diameter*.75*Math.max(patch.aspect,1/patch.aspect);
-    const fromX=patch.side<0?-outside:width+outside,toX=patch.exitSide<0?-outside:width+outside;
-    const mix=(a,b,t)=>a+(b-a)*t;
+    // Drift is a tiny orbit around the anchor, never velocity accumulated over
+    // the effect's lifetime. Even aggressive tuning cannot sweep a cloud away.
+    const drift=reducedMotion?0:Math.min(4,Math.max(0,settings.driftPixelsPerSecond));
+    const dx=(Math.sin(localAge*.42+patch.phase)-Math.sin(patch.phase))*drift*.5;
+    const dy=(Math.cos(localAge*.36+patch.phase*1.7)-Math.cos(patch.phase*1.7))*drift*.35;
     return {
-      x:reducedMotion?targetX:mix(mix(fromX,targetX,enter),toX,leave),
-      y:reducedMotion?targetY:mix(mix(patch.entryY*height,targetY,enter),patch.exitY*height,leave),
-      diameter:diameter*(reducedMotion?1:.9+.1*enter),
+      x:patch.x*width+dx,
+      y:patch.y*height+dy,
+      diameter,
       opacity:smokeEnvelope(age,remaining,settings,patch.delay),localAge,
     };
   }

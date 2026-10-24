@@ -1,6 +1,7 @@
 /* Edit these values, save, then refresh the game. All times are in seconds.
  * Rotation limits are speed magnitudes in degrees/second; direction is chosen
- * separately for each tile. Set both rotation limits to 0 to stop spinning.
+ * separately for each tile. Set both letter rotation limits to 0 to stop their spinning;
+ * two-sided pickups use hourglass.rotationDegreesPerSecond.
  */
 (function (root, factory) {
   const api = factory();
@@ -15,14 +16,14 @@
   },
   "rules": {
     "minWordLength": 3,
-    "nextLetterSeconds": 5
+    "nextLetterSeconds": 4.5
   },
   "combo": {
     "enabled": true,
     "wordsToStart": 3,
     "maxGapSeconds": 8,
     "extraSecondsPerWord": 0.25,
-    "maxExtraSeconds": 5
+    "maxExtraSeconds": 3
   },
   "wildcards": {
     "chance": 0.05,
@@ -39,7 +40,7 @@
     "threeLetterMaxSeconds": 0.5,
     "fourLetterMultiplier": 0.25,
     "fourLetterMaxSeconds": 2,
-    "longWordMultiplier": 1.5
+    "longWordMultiplier": 1.2
   },
   "bonusLetters": {
     "chance": 0.16,
@@ -55,13 +56,12 @@
     "minWordLength": 5,
     "spawnChance": 0.3333333333333333,
     "speedMultiplier": 1.8,
+    "rotationDegreesPerSecond": 56,
     "durationSeconds": 5,
     "timeScale": 0.4,
     "color": "#bce2d6"
   },
   "smoke": {
-    "letterChance": 0.09,
-    "letterSpeedMultiplier": 1.8,
     "durationSeconds": 5,
     "patchCount": 4,
     "radiusFraction": 0.27,
@@ -233,8 +233,7 @@
     number('hourglass', 'durationSeconds', 0, true);
     number('hourglass', 'timeScale', 0, true);
     number('smoke', 'durationSeconds', 0, true);
-    number('smoke', 'letterChance');
-    number('smoke', 'letterSpeedMultiplier', 1, true);
+    number('hourglass', 'rotationDegreesPerSecond', 0, true);
     number('smoke', 'radiusFraction', 0, true);
     number('smoke', 'opacity', 0, true);
     for (const key of ['fadeInSeconds', 'fadeOutSeconds', 'driftPixelsPerSecond']) number('smoke', key);
@@ -242,7 +241,6 @@
     if (config.smoke.enterSeconds + config.smoke.exitSeconds > config.smoke.durationSeconds) throw new Error('config.js: smoke entry and exit must fit within durationSeconds.');
     if (config.smoke.fadeInSeconds + config.smoke.fadeOutSeconds > config.smoke.durationSeconds) throw new Error('config.js: smoke fades must fit within durationSeconds.');
     if (config.bonusLetters.chance > 1) throw new Error('config.js: bonusLetters.chance must be between 0 and 1.');
-    if (config.smoke.letterChance > 1) throw new Error('config.js: smoke.letterChance must be between 0 and 1.');
     if (config.hourglass.timeScale >= 1) throw new Error('config.js: hourglass.timeScale must be greater than 0 and less than 1.');
     if (config.smoke.radiusFraction > .5 || config.smoke.opacity > 1) throw new Error('config.js: smoke.radiusFraction must be at most 0.5 and smoke.opacity at most 1.');
     if (!Number.isInteger(config.smoke.patchCount) || config.smoke.patchCount < 1) throw new Error('config.js: smoke.patchCount must be a positive integer.');

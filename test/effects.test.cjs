@@ -84,29 +84,29 @@ test('late pickups cannot revive an expired game and effects clear on game over'
   assert.equal(active.remaining, 0);
   assert.deepEqual(active.effects, { hourglass: 0, smoke: 0 });
 });
-test('gold C in CATCH increases time to 22.5 seconds with the same twelve points', () => {
+test('gold C in CATCH increases default time from 14.4 to 18 seconds with the same twelve points', () => {
   const game = create(); spell(game, 'CATCH', 30000, [0]);
-  assert.equal(game.pendingReward, 22.5);
+  near(game.pendingReward, 18);
   assert.equal(game.hasBonus, true);
   const result = game.submit(30000);
   assert.equal(result.points, 12);
-  assert.equal(result.bonusReward, 4.5);
-  assert.equal(result.reward, 22.5);
-  assert.equal(game.remaining, 52.5);
+  near(result.bonusReward, 3.6);
+  near(result.reward, 18);
+  near(game.remaining, 48);
   assert.equal(game.score, 12);
   assert.equal(game.hasBonus, false);
   assert.deepEqual(game.currentTiles, []);
 });
 test('multiple gold letters add their own time boosts without multiplying the whole word', () => {
   const game = create(); spell(game, 'CATCH', 30000, [0, 2]);
-  assert.equal(game.pendingReward, 24);
+  near(game.pendingReward, 19.2);
   assert.equal(game.submit(30000).points, 12);
 });
 test('gold multipliers and reward rates are configurable; the timer cap still applies', () => {
   const game = create({ timer: {maxSeconds:60}, bonusLetters: { timeMultiplier: 3 }, rewards: { secondsPerPoint: .5 } });
   spell(game, 'CATCH', 1000, [0]);
   const result = game.submit(1000);
-  assert.equal(result.requestedReward, 13.5);
+  near(result.requestedReward, 10.8);
   assert.equal(result.reward, 1);
   assert.equal(result.points, 12);
   assert.equal(game.remaining, 60);
@@ -221,56 +221,53 @@ test('hourglasses enter above the top at a random horizontal position away from 
   const open = hourglassPosition(390, 47, [{x:195,y:-47}], () => values.shift() ?? 0);
   assert.ok(Math.abs(open.x-195) > 47);
 });
-test('selecting a grenade letter immediately releases smoke and still spells and scores normally', () => {
+test('legacy grenade flags never add smoke to letters or change their gold rewards', () => {
   const game = create({timer:{maxSeconds:120}});
   const result = game.select('C', 20000, {grenade:true, bonus:true});
-  assert.equal(result.smokeTriggered, true);
-  assert.equal(game.current, 'C');
-  assert.equal(game.effects.smoke, 5);
-  assert.equal(game.score, 0);
-  spell(game, 'ATCH', 20000);
-  const word = game.submit(20000);
-  assert.equal(word.points, 12);
-  assert.equal(word.requestedReward, 22.5);
-  assert.equal(word.reward, 22.5); // Can now bank the full reward above the starting limit.
-  assert.equal(game.effects.smoke, 5);
-  game.advance(25000);
+  assert.equal(result.smokeTriggered, undefined);
+  assert.equal(game.current, 'C');assert.equal(game.effects.smoke, 0);
+  assert.equal(game.currentTiles[0].grenade, false);
+  spell(game, 'ATCH', 20000);const word = game.submit(20000);
+  assert.equal(word.points, 12);near(word.requestedReward, 18);
   assert.equal(game.effects.smoke, 0);
 });
-test('grenade letters refresh smoke, including misspellings, but cannot activate after game over', () => {
-  const game = create();
-  game.select('C', 0, {grenade:true});
-  game.select('A', 1500, {grenade:true});
-  assert.equal(game.effects.smoke, 5);
-  game.select('T', 1500);
-  assert.equal(game.select('Q', 1500, {grenade:true}).smokeTriggered, true);
-  assert.equal(game.current, '');
-  assert.equal(game.effects.smoke, 5);
-  const ending = create({timer: {startSeconds:4}});
-  spell(ending, 'CAT');
-  assert.equal(ending.select('Q', 0, {grenade:true}).ended, true);
-  assert.equal(ending.effects.smoke, 0);
-  const late = create();
-  assert.equal(late.select('C', 60001, {grenade:true}).type, 'ended');
-  assert.equal(late.effects.smoke, 0);
+test('misspellings and blanks cannot activate or refresh smoke from old letter flags', () => {
+  const game = create();game.activate('smoke',0);
+  game.select('C',1000,{grenade:true});game.select('A',1500,{grenade:true});game.select('T',1500);
+  assert.equal(game.select('Q',1500,{grenade:true}).smokeTriggered,undefined);
+  assert.equal(game.current,'');near(game.effects.smoke,3.5);
+  game.select('?',2000,{grenade:true});near(game.effects.smoke,3);
+  assert.equal(game.currentTiles[0].grenade,false);
 });
-test('smoke patches occupy separate random regions and scale with the playfield', () => {
+const seededRandom = seed => () => {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed / 4294967296;
+};
+test('smoke uses varied sizes, silhouettes and spaced in-field anchors', () => {
   const settings = createConfig().smoke;
-  const patches = smokePatches(390, 500, settings, () => .5);
-  assert.equal(patches.length, 4);
-  assert.ok(patches.every(p=>p.x>=.12&&p.x<=.88&&p.y>=.12&&p.y<=.88));
-  for(let i=0;i<patches.length;i++)for(let j=i+1;j<patches.length;j++)assert.ok(Math.hypot(patches[i].x-patches[j].x,patches[i].y-patches[j].y)>.25);
-  assert.ok(patches.every(patch => patch.radius > 0 && patch.radius < .3));
-  const other = smokePatches(390, 500, settings, () => .2);
-  assert.notDeepEqual(patches, other);
-  assert.notDeepEqual(patches.map(p=>p.seed),other.map(p=>p.seed));
+  for (const [width,height] of [[360,780],[390,500],[900,640]]) {
+    const short = Math.min(width,height);
+    for (let seed=1;seed<=30;seed++) {
+      const patches = smokePatches(width,height,settings,seededRandom(seed));
+      assert.deepEqual(patches,smokePatches(width,height,settings,seededRandom(seed)));
+      assert.equal(patches.length,4);
+      assert.ok(patches.every(p=>p.x>=.14&&p.x<=.86&&p.y>=.20&&p.y<=.74));
+      for(let i=0;i<patches.length;i++)for(let j=i+1;j<patches.length;j++)
+        assert.ok(Math.hypot((patches[i].x-patches[j].x)*width/short,(patches[i].y-patches[j].y)*height/short)>.25);
+      const radii=patches.map(p=>p.radius);
+      assert.ok(radii.every(radius=>radius>=settings.radiusFraction*.64&&radius<settings.radiusFraction*1.34));
+      assert.ok(Math.max(...radii)/Math.min(...radii)>1.4);
+      for(const key of ['seed','phase','aspect']) assert.equal(new Set(patches.map(p=>p[key])).size,4);
+      assert.ok(patches.every(p=>p.aspect>=.73&&p.aspect<1.35));
+      assert.notDeepEqual(patches,smokePatches(width,height,settings,seededRandom(seed+1)));
+    }
+  }
 });
 test('invalid effect settings are rejected before a round starts', () => {
   assert.throws(() => createConfig({ hourglass: { timeScale: 0 } }), /hourglass.timeScale/);
   assert.throws(() => createConfig({ hourglass: { timeScale: 1 } }), /hourglass.timeScale/);
   assert.throws(() => createConfig({ bonusLetters: { chance: 2 } }), /bonusLetters.chance/);
-  assert.throws(() => createConfig({ smoke: { letterSpeedMultiplier: 1 } }), /smoke.letterSpeedMultiplier/);
-  assert.throws(() => createConfig({ smoke: { letterChance: 2 } }), /smoke.letterChance/);
+  for(const rotationDegreesPerSecond of [0,-1,Infinity,NaN])assert.throws(() => createConfig({hourglass:{rotationDegreesPerSecond}}), /rotationDegreesPerSecond/);
   assert.throws(() => createConfig({ hourglass: { spawnChance: 2 } }), /hourglass.spawnChance/);
   assert.throws(() => createConfig({ hourglass: { minWordLength: 0 } }), /hourglass.minWordLength/);
   assert.throws(() => createConfig({ hourglass: { speedMultiplier: 1 } }), /hourglass.speedMultiplier/);
@@ -287,21 +284,44 @@ test('pink smoke fades smoothly, holds an opaque center, and ends on time',()=>{
  assert.throws(()=>createConfig({smoke:{driftPixelsPerSecond:-1}}));
 });
 
-test('smoke travels from both edges to random regions and exits to the sides',()=>{
+test('smoke forms and dissolves at its anchor with only a few pixels of drift',()=>{
   const s=createConfig().smoke;
   for(const [width,height] of [[360,780],[900,640]]){
-    const patches=smokePatches(width,height,s,()=>.35);
-    assert.deepEqual(new Set(patches.map(p=>p.side)),new Set([-1,1]));
+    const patches=smokePatches(width,height,s,seededRandom(36));
     for(const patch of patches){
       const start=smokePose(patch,0,5,width,height,s),middle=smokePose(patch,2,3,width,height,s),end=smokePose(patch,5,0,width,height,s);
-      assert.ok(patch.side<0?start.x<0:start.x>width);assert.equal(start.opacity,0);
+      near(start.x,patch.x*width);near(start.y,patch.y*height);assert.equal(start.opacity,0);
       assert.ok(middle.x>0&&middle.x<width&&middle.y>0&&middle.y<height);assert.equal(middle.opacity,1);
-      assert.ok(patch.exitSide<0?end.x<0:end.x>width);assert.equal(end.opacity,0);
-      const reduced=smokePose(patch,2,3,width,height,s,true);
-      near(reduced.x,patch.x*width);near(reduced.y,patch.y*height);assert.equal(reduced.opacity,1);
+      assert.equal(end.opacity,0);
+      for(let tick=0;tick<=50;tick++){
+        const age=tick/10,remaining=5-age;
+        for(const driftPixelsPerSecond of [0,s.driftPixelsPerSecond,1000]){
+          const settings={...s,driftPixelsPerSecond};
+          const pose=smokePose(patch,age,remaining,width,height,settings);
+          assert.ok(Math.hypot(pose.x-patch.x*width,pose.y-patch.y*height)<5);
+          near(pose.diameter,start.diameter);
+          near(pose.opacity,smokeEnvelope(age,remaining,s,patch.delay));
+          const reduced=smokePose(patch,age,remaining,width,height,settings,true);
+          near(reduced.x,patch.x*width);near(reduced.y,patch.y*height);
+          near(reduced.opacity,pose.opacity);near(reduced.diameter,pose.diameter);
+          if(driftPixelsPerSecond===0){near(pose.x,reduced.x);near(pose.y,reduced.y);}
+        }
+      }
     }
   }
-  assert.throws(()=>createConfig({smoke:{enterSeconds:4,exitSeconds:2}}),/smoke/);
+});
+
+test('anchored smoke freezes during pause and still dissolves on active time with hourglass',()=>{
+  const game=create(),s=createConfig().smoke;
+  const patch=smokePatches(390,500,s,seededRandom(12))[0];
+  const pose=()=>smokePose(patch,s.durationSeconds-game.effects.smoke,game.effects.smoke,390,500,s);
+  game.activate('hourglass',0);game.activate('smoke',0);
+  game.pause(2000);
+  const frozen=pose();
+  game.advance(100000);assert.deepEqual(pose(),frozen);assert.equal(frozen.opacity,1);
+  game.resume(100000);game.advance(102400);
+  near(game.effects.smoke,.6);near(pose().opacity,.5);
+  game.advance(103000);near(game.effects.smoke,0);near(pose().opacity,0);
 });
 
 
@@ -312,7 +332,7 @@ test('special tiles stay out of the opening and unlock only after active warm-up
   assert.equal(game.specialTilesUnlocked,false);
   game.pause(9999);game.advance(999999);assert.equal(game.specialTilesUnlocked,false);
   game.resume(999999);game.advance(1000000);
-  assert.equal(game.specialTilesUnlocked,true);assert.equal(game.rollTileTraits(()=>0).grenade,true);
+  assert.equal(game.specialTilesUnlocked,true);assert.equal(game.rollTileTraits(()=>0).grenade,false);
   spell(game,'SMILE',1000000);assert.equal(game.submit(1000000).hourglassOffered,true);
   game.start(2000000);assert.equal(game.specialTilesUnlocked,false);assert.equal(game.rollTileTraits(()=>0).grenade,false);
   assert.throws(()=>createConfig({specialTiles:{warmupSeconds:-1}}),/warmupSeconds/);

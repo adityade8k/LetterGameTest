@@ -85,7 +85,7 @@ test('specials keep their 20-second warm-up independently of the steady pace',()
   const game=new WordGame(['CATCH','SMILE'],{hourglass:{spawnChance:1}},()=>0);game.start(0);
   for(const letter of 'CATCH')game.select(letter,19999);
   assert.equal(game.submit(19999).hourglassOffered,false);assert.equal(game.rollTileTraits(()=>0).grenade,false);
-  game.advance(20000);assert.equal(game.rollTileTraits(()=>0).grenade,true);
+  game.advance(20000);assert.equal(game.rollTileTraits(()=>0).grenade,false);
   for(const letter of 'SMILE')game.select(letter,20000);
   assert.equal(game.submit(20000).hourglassOffered,true);
   game.start(30000);assert.equal(game.rollTileTraits(()=>0).grenade,false);

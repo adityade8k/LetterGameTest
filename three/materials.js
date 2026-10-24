@@ -83,16 +83,24 @@ export function smokeMaterial() {
       }
       void main(){
         vec2 p=(vUv-.5)*2.;
-        float edge=length(p)-.53;
-        for(int i=0;i<7;i++){
-          float n=float(i),angle=n*6.2831853/7.+hash(n+20.)*.55;
-          float reach=.32+hash(n+40.)*.15;
-          vec2 center=vec2(cos(angle),sin(angle))*reach;
-          float radius=.27+hash(n+60.)*.12+sin(time*.7+n+seed)*.012;
-          edge=unionCloud(edge,length(p-center)-radius);
+        // An asymmetric opaque core plus a seed-specific cluster of lobes:
+        // clouds differ in silhouette as well as overall size and rotation.
+        vec2 core=(vec2(hash(2.),hash(3.))-.5)*.13;
+        vec2 coreShape=vec2(.88+hash(4.)*.25,.86+hash(5.)*.28);
+        float edge=length((p-core)/coreShape)-(.43+hash(6.)*.07);
+        float lobeCount=5.+floor(hash(7.)*5.);
+        for(int i=0;i<9;i++){
+          float n=float(i);
+          if(n<lobeCount){
+            float angle=n*6.2831853/lobeCount+(hash(n+20.)-.5)*.95;
+            float reach=.24+hash(n+40.)*.25;
+            vec2 center=vec2(cos(angle),sin(angle))*reach+core*.5;
+            float radius=.22+hash(n+60.)*.14+sin(time*.55+n+seed)*.009;
+            edge=unionCloud(edge,length(p-center)-radius);
+          }
         }
-        float billow=noise(p*3.8+vec2(time*.09,-time*.07));
-        edge+=(billow-.5)*.055;
+        float billow=noise(p*(3.2+hash(9.)*1.5)+vec2(time*.045,-time*.035));
+        edge+=(billow-.5)*.055+(1.-opacity)*(.10+billow*.055);
         float alpha=(1.-smoothstep(-.13,.025,edge))*opacity;
         float light=clamp(.46+.25*p.y+.29*billow,0.,1.);
         vec3 col=mix(tint*.88,mix(tint,vec3(1.,.77,.82),.48),light);

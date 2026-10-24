@@ -21,7 +21,7 @@ test('wildcards keep every viable interpretation open as the word grows',()=>{
   assert.deepEqual(new Set(game.currentPrefixes),new Set(['CAT','COT']));
   assert.equal(game.select('C',0).type,'letter');assert.equal(game.isWord,false);
   assert.equal(game.select('H',0).type,'letter');
-  const result=game.submit(0);assert.equal(result.word,'CATCH');assert.equal(result.points,11);assert.equal(result.requestedReward,16.5);
+  const result=game.submit(0);assert.equal(result.word,'CATCH');assert.equal(result.points,11);assert.equal(result.requestedReward,13.2);
 });
 
 test('ambiguous blanks prefer an unused matching word, then apply the repeat penalty',()=>{
@@ -46,6 +46,20 @@ test('blanks cannot gain points or gold time from their resolved letter',()=>{
   assert.equal(game.effects.smoke,0);assert.equal(game.currentTiles[1].bonus,false);
   const result=game.submit(0);assert.equal(result.points,4);
   assert.ok(Math.abs(result.requestedReward-.7)<1e-9);assert.ok(Math.abs(result.bonusReward-.3)<1e-9);
+});
+
+test('default long-word rewards combine zero-value blanks with additive gold time at 1.2 seconds per point',()=>{
+  const game=create(['CATCH']);
+  game.select('C',0,{bonus:true});game.select('?',0,{bonus:true});
+  for(const letter of 'TCH')game.select(letter,0);
+  assert.equal(game.advance(4499),null);
+  const result=game.advance(4500);
+  assert.equal(result.automatic,true);assert.equal(result.word,'CATCH');assert.equal(result.blankCount,1);
+  assert.equal(result.points,11);assert.equal(game.score,11);
+  assert.equal(result.selectedTiles[1].bonus,false);
+  assert.ok(Math.abs(result.bonusReward-3.6)<1e-9);
+  assert.ok(Math.abs(result.requestedReward-16.8)<1e-9);
+  assert.equal(result.reward,4.5); // 60-second default cap: only 4.5s of room, not all potential time.
 });
 
 test('continuation help honors wildcard positions and excludes collected matches',async()=>{

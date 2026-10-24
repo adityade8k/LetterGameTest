@@ -124,3 +124,46 @@ test('controls stay within narrow mobile canvases and their safe areas',supporte
     }
   }
 });
+
+test('trash clears on the left and paper-plane or word surface submits on the right',supported,async()=>{
+  const {ui,game,view,hit,sync}=await create();game.start(0);for(const letter of 'CAT')game.select(letter,0);sync();
+  assert.equal(hit(45,521),'undo');assert.equal(hit(180,521),'submit');assert.equal(hit(315,521),'submit');
+  assert.match(ui.buttons().find(button=>button.id==='undo').label,/Clear whole word/);
+  assert.equal(ui.selectionTarget(0).x,109);assert.equal(ui.selectionTarget(0).y,521);
+  const before=game.remaining;game.undo(0);sync();assert.equal(game.current,'');assert.equal(game.remaining,before-game.config.penalties.clearWordSeconds);
+  assert.equal(hit(45,521),null);assert.equal(hit(315,521),null);
+});
+
+test('point flights start at the word and gate the score through overlapping arrivals and pauses',supported,async()=>{
+  const {ui,game,view,hit,sync}=await create();ui.setReducedMotion(false);game.start(0);
+  const score=()=>{let value;ui.scene.traverse(object=>{if(Object.hasOwn(object.userData,'displayedScore'))value=object.userData.displayedScore;});return value;};
+  const visualFlights=()=>{const flights=[];ui.scene.traverse(object=>{if(object.userData.scoreFlight)flights.push(object);});return flights;};
+  const word=letters=>{for(const letter of letters)game.select(letter,0);const result=game.submit(0);view.best=game.score;ui.celebrate(result,game);sync();return result;};
+  const first=word('CAT');assert.equal(score(),0);assert.equal(visualFlights().length,1);
+  const badge=visualFlights()[0].children[0];assert.ok(badge.position.x>=89&&badge.position.x<=294);assert.equal(badge.position.y,-521);
+  assert.equal(hit(180,521),null);ui.animate(400,.4,game);
+  const second=word('DOG');assert.equal(score(),0);assert.equal(visualFlights().length,2);
+  game.pause(0);view.mode='paused';sync();ui.animate(5400,5,game);assert.equal(score(),0);assert.equal(visualFlights()[0].userData.scoreFlight.age,.4);
+  game.resume(0);view.mode='';sync();ui.animate(5900,.5,game);assert.equal(score(),first.points);assert.equal(visualFlights().length,1);
+  ui.animate(6300,.4,game);assert.equal(score(),first.points+second.points);assert.equal(visualFlights().length,0);
+});
+
+test('reduced motion and game-over/reset settle pending points without lingering flight meshes',supported,async()=>{
+  const {ui,game,view,sync}=await create();ui.setReducedMotion(false);game.start(0);
+  const score=()=>{let value;ui.scene.traverse(object=>{if(Object.hasOwn(object.userData,'displayedScore'))value=object.userData.displayedScore;});return value;};
+  const flights=()=>{let count=0;ui.scene.traverse(object=>{if(object.userData.scoreFlight)count++;});return count;};
+  const word=letters=>{for(const letter of letters)game.select(letter,0);ui.celebrate(game.submit(0),game);sync();};
+  word('CAT');assert.equal(score(),0);ui.setReducedMotion(true);sync();assert.equal(score(),game.score);assert.equal(flights(),0);
+  word('DOG');assert.equal(score(),game.score);assert.equal(flights(),1);ui.animate(400,.4,game);assert.equal(flights(),0);
+  ui.setReducedMotion(false);word('APPLE');assert.ok(score()<game.score);game.phase='over';view.mode='over';sync();assert.equal(score(),game.score);assert.equal(flights(),0);
+  ui.reset();game.start(0);view.mode='';sync();assert.equal(score(),0);assert.equal(flights(),0);
+});
+
+
+test('help explains the facing-side pickup and no longer teaches grenade letters',supported,async()=>{
+  const {ui,game,view,sync}=await create();view.mode='help';sync();
+  const description=ui.description(game,view);
+  assert.match(description,/hourglass face.*slow time.*smoke bomb face.*smoke/);
+  assert.match(description,/Letter tiles never release smoke/);
+  assert.doesNotMatch(description,/Grenade letters release/);
+});

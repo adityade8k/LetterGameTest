@@ -4,7 +4,8 @@ import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
 import { celMaterial, atmosphereMaterial, smokeMaterial } from './materials.js';
 import { createUI } from './ui.js';
-import { createIcon } from './icons.js';
+import { createPickupFaces } from './icons.js';
+import { pickupEffectFromYaw } from './pickup-facing.mjs';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout } from './layout.mjs';
 
@@ -82,20 +83,19 @@ export async function createScene(host, config, reducedMotion) {
     group.add(body);
     const front = new THREE.Group();
     if (tile.kind === 'hourglass') {
-      const icon = createIcon('hourglass',materials.plum,materials.gold); icon.scale.setScalar(1.05); icon.position.z = faceDepth+.8; front.add(icon);
+      group.add(createPickupFaces(materials.plum,materials.gold,faceDepth));
     } else {
       // Separate typographic zones: badge row, letter, then point value.
       // Every glyph is fitted by its actual geometry, including wide W/M.
       if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25),face.letter));
       front.add(placeFace(textMesh(String(tile.blank?0:config.letterPoints[tile.letter]),5.5,.65),face.points));
       if(tile.bonus)front.add(placeFace(textMesh(`x${config.bonusLetters.timeMultiplier}`,6,.8),face.bonus));
-      if(tile.grenade)front.add(placeFace(createIcon('grenade',materials.plum,materials.gold),face.grenade));
     }
     // Rotate a second face outward so its lettering reads normally from behind.
     // Cloning reuses the cached geometries and materials on both sides.
-    const back = front.clone();
-    back.rotation.y = Math.PI;
-    group.add(front, back);
+    if(tile.kind!=='hourglass'){
+      const back = front.clone();back.rotation.y = Math.PI;group.add(front, back);
+    }
     group.userData.tile = tile;
     const halo = new THREE.Mesh(shadowGeometry, shadow); halo.position.z = -8; halo.renderOrder = -1;
     scene.add(halo, group);
@@ -122,6 +122,7 @@ export async function createScene(host, config, reducedMotion) {
     transfers.length = 0;
   }
   function transferTarget(transfer) {
+    if(transfer.target==='smoke')return {x:transfer.x,y:transfer.y};
     const kind = transfer.target === 'timer' ? 'hourglass' : 'letter';
     return ui.selectionTarget?.(transfer.index, kind) || (kind === 'hourglass'
       ? { x: layout.left + 320, y: layout.top + 87 }
@@ -146,7 +147,8 @@ export async function createScene(host, config, reducedMotion) {
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
       model.group.position.set(tile.x-layout.width/2,layout.height/2-tile.y+previewFloat,0);
       // Apply local Y turns before the fixed face tilt and screen-plane angle.
-      model.group.rotation.set(DESIGN.tile.tiltX+(tile.pitch||0), DESIGN.tile.tiltY+(tile.yaw||0), -tile.tilt, 'ZXY');
+      if(tile.kind==='hourglass')model.group.rotation.set(0,tile.yaw||0,0,'ZXY');
+      else model.group.rotation.set(DESIGN.tile.tiltX+(tile.pitch||0), DESIGN.tile.tiltY+(tile.yaw||0), -tile.tilt, 'ZXY');
       // Hover lifts the tile, without growing its collision silhouette.
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
@@ -172,7 +174,7 @@ export async function createScene(host, config, reducedMotion) {
       transfer.group.position.set(x - layout.width / 2, layout.height / 2 - y, 6);
       transfer.group.scale.setScalar(1 - eased * .68);
       transfer.group.rotation.x = transfer.rotation.x * (1 - eased);
-      transfer.group.rotation.y = transfer.rotation.y * (1 - eased);
+      transfer.group.rotation.y = transfer.target==='smoke' ? transfer.rotation.y : transfer.rotation.y * (1 - eased);
       transfer.group.rotation.z = transfer.rotation.z * (1 - eased);
       const opacity = 1 - Math.max(0, (progress - .45) / .55);
       for (const material of transfer.materials) material.uniforms.opacity.value = opacity;
@@ -195,6 +197,11 @@ export async function createScene(host, config, reducedMotion) {
   }
   return {
     canvas, render, ui,
+    pickupEffect(tile) {
+      // Match the last displayed frame for both pointer and keyboard input.
+      const model=bodies.get(tile);
+      return model ? pickupEffectFromYaw(model.group.rotation.y) : null;
+    },
     get layout(){return layout;},
     setReducedMotion(value) {
       reducedMotion = Boolean(value);

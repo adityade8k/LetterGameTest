@@ -41,3 +41,34 @@ test('penalties during a refill never display a negative timer; invalid duration
   m.add(12,8);assert.equal(m.values(2,8).time,0);
   assert.throws(()=>createConfig({celebration:{timerRefillSeconds:0}}),/timerRefillSeconds/);
 });
+
+test('score flights withhold each reward until its independent arrival',async()=>{
+  const {ScoreFlights}=await modulePromise,flights=new ScoreFlights({durationSeconds:.9});
+  const first=flights.add(8);assert.equal(flights.value(8),0);
+  flights.advance(.4);const second=flights.add(5);assert.equal(flights.value(13),0);
+  flights.advance(.49);assert.equal(flights.value(13),0);
+  assert.deepEqual(flights.advance(.01).map(f=>f.id),[first.id]);assert.equal(flights.value(13),8);assert.equal(second.arrived,false);
+  flights.retire(first.id);flights.advance(.39);assert.equal(flights.value(13),8);
+  assert.deepEqual(flights.advance(.01).map(f=>f.id),[second.id]);assert.equal(flights.value(13),13);
+  assert.deepEqual(flights.advance(1),[]);assert.equal(flights.value(13),13);
+});
+
+test('score flights freeze, reconcile multiple arrivals and reset without duplicate points',async()=>{
+  const {ScoreFlights}=await modulePromise,flights=new ScoreFlights();
+  flights.add(7);flights.advance(.2);flights.add(3);flights.advance(0);assert.equal(flights.value(10),0);
+  const arrivals=flights.advance(10);assert.equal(arrivals.length,2);assert.equal(flights.value(10),10);
+  assert.deepEqual(flights.advance(10),[]);
+  flights.add(5);assert.equal(flights.value(15),10);flights.reset();assert.equal(flights.value(15),15);
+  assert.equal(flights.add(0),null);assert.equal(flights.add(NaN),null);assert.equal(flights.add(-1),null);
+  flights.add(2,{immediate:true});assert.equal(flights.value(17),17);assert.deepEqual(flights.advance(.1),[]);
+});
+
+test('flight motion pops at the word, curves toward the score, then arrives precisely',async()=>{
+  const {ScoreFlights,scoreFlightPose}=await modulePromise,flights=new ScoreFlights({durationSeconds:.9});
+  const flight=flights.add(8),from={x:160,y:521},to={x:232,y:47};
+  let pose=scoreFlightPose(flight,from,to);near(pose.x,160);near(pose.y,521);assert.equal(pose.alpha,0);
+  flights.advance(.08);pose=scoreFlightPose(flight,from,to);assert.ok(pose.scale>1);assert.ok(pose.y<521);
+  flights.advance(.42);pose=scoreFlightPose(flight,from,to);assert.ok(pose.x>160);assert.ok(pose.y<521&&pose.y>47);
+  flights.advance(.4);pose=scoreFlightPose(flight,from,to);near(pose.x,232);near(pose.y,47);assert.equal(flight.arrived,true);assert.equal(pose.alpha,0);
+  const immediate=flights.add(4,{immediate:true});pose=scoreFlightPose(immediate,from,to,{reducedMotion:true});near(pose.x,to.x);near(pose.y,to.y+19);assert.equal(pose.scale,1);
+});

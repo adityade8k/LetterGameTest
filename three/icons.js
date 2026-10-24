@@ -1,5 +1,17 @@
 import * as THREE from 'three';
 
+// Separate outward-facing symbols; never mirror the hourglass onto the back.
+export function createPickupFaces(ink, accent, faceDepth) {
+  const faces = new THREE.Group();
+  for (const [effect, iconKind, yaw] of [['hourglass','hourglass',0],['smoke','grenade',Math.PI]]) {
+    const face = new THREE.Group();face.userData.pickupEffect=effect;face.rotation.y=yaw;
+    const icon=createIcon(iconKind,ink,accent);icon.scale.setScalar(1.05);icon.position.z=faceDepth+.8;
+    face.add(icon);faces.add(face);
+  }
+  return faces;
+}
+
+
 // Shared, modeled pictograms. Every symbol uses the same proportions and
 // rounded stroke weight in the menus and on the tiles; nothing is rasterized.
 const cache=new Map();
@@ -10,6 +22,17 @@ export function createIcon(kind,ink,accent=ink){
   const group=new THREE.Group();
   const add=(geo,mat=ink,x=0,y=0,z=0)=>{const mesh=new THREE.Mesh(geo,mat);mesh.position.set(x,y,z);group.add(mesh);return mesh;};
   if(kind==='arrow')add(polygon('arrow',[[-7,-5],[-5,-7],[5,3],[5,-2],[8,-2],[8,8],[-2,8],[-2,5],[3,5]]));
+  if(kind==='trash'){
+    add(polygon('trash-body',[[-6,4],[6,4],[5,-8],[-5,-8]],1.5));
+    add(polygon('trash-lid',[[-8,7],[8,7],[8,5],[-8,5]],1.6));
+    add(tube('trash-handle',[[-2,8,1],[-2,10,1],[2,10,1],[2,8,1]],.8));
+    for(const x of [-2,2])add(tube(`trash-slot-${x}`,[[x,1,2],[x,-5,2]],.55),accent);
+  }
+  if(kind==='paperPlane'){
+    add(polygon('plane-main',[[-10,4],[11,9],[4,-11],[-1,-2]],1.5));
+    add(polygon('plane-fold',[[-1,-2],[11,9],[-5,0]],.7),accent,0,0,1.8);
+    add(tube('plane-crease',[[-1,-2,2.7],[6,5,2.7]],.45),accent);
+  }
   if(kind==='pause'){
     for(const x of [-4,4])add(geometry('pause-bar',()=>new THREE.CapsuleGeometry(1.5,10,4,8)),ink,x,0,1);
   }

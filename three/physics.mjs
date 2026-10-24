@@ -7,8 +7,16 @@ export function prepareTile(tile,config,random=Math.random){
   tile.vx=0;tile.vy=null;tile.age=0;tile.baseTilt=tile.tilt;
   // Y remains dominant on valuable letters, with a different 3D tumble per tile.
   tile.turnAxis=high?'y':'z';tile.yaw=0;tile.pitch=0;
+  if(tile.kind==='hourglass'){
+    // A gameplay turn, not a decorative tumble: only Y, without rest periods.
+    tile.pitch=0;tile.tilt=0;tile.baseTilt=0;tile.pitchOffset=0;tile.yawOffset=0;
+    tile.yaw=random()*Math.PI*2;tile.spins=true;tile.turnAxis='y';
+    tile.turnAxes={x:0,y:1,z:0};tile.rest=0;
+    tile.rotationSpeed=radians(config.hourglass.rotationDegreesPerSecond);
+    return tile;
+  }
   tile.rockPhase=random()*Math.PI*2;
-  tile.spins=tile.kind==='hourglass'||random()<(high?rotation.highValueSpinChance:rotation.ordinarySpinChance);
+  tile.spins=random()<(high?rotation.highValueSpinChance:rotation.ordinarySpinChance);
   // High-value tiles use the upper half of the same user-controlled speed range.
   const low=high?(rotation.minDegreesPerSecond+rotation.maxDegreesPerSecond)/2:rotation.minDegreesPerSecond;
   tile.rotationSpeed=radians(randomRange(low,rotation.maxDegreesPerSecond,random))*(rotation.randomDirection&&random()<.5?-1:1);
@@ -22,6 +30,10 @@ export function prepareTile(tile,config,random=Math.random){
 }
 function rotate(tile,dt,config,reducedMotion,random){
   if(dt<=0)return;
+  if(tile.kind==='hourglass'){
+    tile.age+=dt;tile.yaw=(tile.yaw+tile.rotationSpeed*dt)%(Math.PI*2);
+    return; // Essential face-choice motion also runs with reduced motion.
+  }
   if(reducedMotion&&config.rotation.respectReducedMotion)return;
   if(!config.rotation.maxDegreesPerSecond)return;
   tile.age+=dt;
@@ -95,7 +107,7 @@ export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,
   const steps=Math.max(1,Math.ceil(dt*120)),step=dt/steps,settings=config.physics;
   for(let n=0;n<steps;n++){
     for(const tile of tiles){
-      const target=speed*(tile.kind==='hourglass'?config.hourglass.speedMultiplier:tile.grenade?config.smoke.letterSpeedMultiplier:1);
+      const target=speed*(tile.kind==='hourglass'?config.hourglass.speedMultiplier:1);
       if(tile.vy===null||tile.vy===undefined)tile.vy=target;
       tile.vy+=(target-tile.vy)*(1-Math.exp(-settings.fallRecovery*step));
       tile.vx*=Math.exp(-settings.lateralDamping*step);

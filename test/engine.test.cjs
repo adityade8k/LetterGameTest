@@ -4,6 +4,7 @@ const { WordGame } = require('../engine.js');
 const dictionary = require('../data/words.js');
 const create = options => { const game = new WordGame(dictionary, options); game.start(0); return game; };
 const spell = (game, word, now = 0) => [...word].map(letter => game.select(letter, now)).at(-1);
+const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} versus ${expected}`);
 
 test('real dictionary accepts CAT and CATCH, and a viable partial spelling', () => {
   const game = create();
@@ -34,7 +35,7 @@ test('new words earn full letter points with length-based time and can enter ove
   spell(game, 'CATCH', 10000); game.submit(10000);
   spell(game, 'DOG', 10000);
   assert.equal(game.submit(10000).reward, .5);
-  assert.equal(game.remaining, 69);
+  near(game.remaining, 65.4);
   assert.equal(game.score, 22);
   assert.equal(game.wordCount, 3);
 });
@@ -132,11 +133,12 @@ test('Scrabble values distinguish words by letters, not only length', () => {
 test('a higher-value valid word earns more time when there is room on the clock', () => {
   const cheap = create(); spell(cheap, 'SMILE', 30000);
   const valuable = create(); spell(valuable, 'CATCH', 30000);
-  assert.equal(cheap.submit(30000).reward, 10.5);
+  assert.equal(cheap.config.rewards.longWordMultiplier, 1.2);
+  near(cheap.submit(30000).reward, 8.4);
   const result = valuable.submit(30000);
   assert.equal(result.points, 12);
-  assert.equal(result.reward, 18);
-  assert.equal(valuable.remaining, 48);
+  near(result.reward, 14.4);
+  near(valuable.remaining, 44.4);
   assert.equal(valuable.score, 12);
 });
 test('empty undo is harmless and cannot repeatedly charge a player', () => {
@@ -186,7 +188,7 @@ test('configurable minimum word length applies to validation', () => {
 });
 
 test('three-letter words cost net time, four-letter words barely recover it, and five letters pay off', () => {
-  for (const [word, elapsed, reward] of [['CAT',3000,.5],['QUIZ',2000,2],['STARE',5000,7.5]]) {
+  for (const [word, elapsed, reward] of [['CAT',3000,.5],['QUIZ',2000,2],['STARE',5000,6]]) {
     const game = create({timer:{startSeconds:40}}); spell(game, word, elapsed);
     const result = game.submit(elapsed);
     assert.equal(result.requestedReward, reward);
@@ -210,9 +212,10 @@ test('configured overtime banks rewards up to 200 percent, then drains and resta
   const game=create({timer:{maxSeconds:120}});
   assert.equal(game.remaining,60);assert.equal(game.config.timer.maxSeconds,120);
   for(const word of ['CATCH','SMILE','STARE','FLOWER']){spell(game,word);game.submit(0);}
-  assert.equal(game.remaining,114);
-  spell(game,'FLOWERS');const capped=game.submit(0);
-  assert.equal(capped.reward,6);assert.equal(game.remaining,120);
+  near(game.remaining,103.2);
+  spell(game,'FLOWERS');near(game.submit(0).reward,15.6);near(game.remaining,118.8);
+  spell(game,'PLANET');const capped=game.submit(0);
+  near(capped.reward,1.2);assert.equal(game.remaining,120);
   spell(game,'CAT');assert.equal(game.submit(0).reward,0);assert.equal(game.remaining,120);
   game.advance(60000);assert.equal(game.remaining,60);assert.equal(game.phase,'running');
   game.advance(120000);assert.equal(game.remaining,0);assert.equal(game.phase,'over');

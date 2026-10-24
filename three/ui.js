@@ -3,7 +3,7 @@ import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { celMaterial } from './materials.js';
 import { DESIGN } from './design.js';
 import { createIcon } from './icons.js';
-import { RewardMeters, clamp01, easeOut } from './reward-motion.mjs';
+import { RewardMeters, ScoreFlights, scoreFlightPose, clamp01, easeOut } from './reward-motion.mjs';
 import { overlapsPanel } from './layout.mjs';
 
 // Every visible interface element is geometry in this scene. There are no
@@ -36,6 +36,8 @@ export function createUI(font, config, reducedMotion=false) {
   let collectionPage = 0, collectionPages = 1, bookPages = 1;
   let latestView={}, settleAge=Infinity, resolvedWord='', resolvedLetters=[], latestRecentRoot=null, sessionNewWords=new Set();
   const meters=new RewardMeters(config.celebration),celebrations=[];
+  const scoreLedger=new ScoreFlights({durationSeconds:config.engagement?.scoreFlightSeconds}),scoreFlights=[];
+  let scoreSettleAge=Infinity;
   let lastBest=0,currentLayout=null,effectsVisible=false;
 
   function group(parent = scene, x = 0, y = 0, z = 0) {
@@ -105,8 +107,8 @@ export function createUI(font, config, reducedMotion=false) {
     }
     const g=new THREE.Group();parent.add(g);build(g);slots.set(key,{signature,group:g});return g;
   }
-  function icon(parent,kind,x,y,{scale=1,material='ink',z=6}={}) {
-    const g=createIcon(kind,materials[material],['hourglass','grenade'].includes(kind)?materials.gold:materials[material]);
+  function icon(parent,kind,x,y,{scale=1,material='ink',accent,z=6}={}) {
+    const g=createIcon(kind,materials[material],accent?materials[accent]:['hourglass','grenade'].includes(kind)?materials.gold:materials[material]);
     g.position.set(x,-y,z);g.scale.setScalar(scale);parent.add(g);return g;
   }
   const shadowMaterial=new THREE.ShaderMaterial({
@@ -182,17 +184,17 @@ export function createUI(font, config, reducedMotion=false) {
 
   plinth(playing,12,470,336,151,15);
   text(playing,'YOUR WORD',22,480,{size:6.7,spacing:.5});
-  const submit=button(playing,'submit','',22,498,262,46);
-  icon(submit.root,'arrow',239,24,{material:'muted',scale:.8,z:5});
-  const undo=button(playing,'undo','',292,498,46,46);
-  text(undo.root,'Clear',23,10,{size:8,align:'center',z:5});text(undo.root,`-${fmt(config.penalties.clearWordSeconds)}s`,23,29,{size:6.7,align:'center',material:'muted',z:5});
+  const submit=button(playing,'submit','',76,498,262,46);
+  icon(submit.root,'paperPlane',239,22,{material:'ink',accent:'paper',scale:.8,z:5});
+  const undo=button(playing,'undo','',22,498,46,46);
+  icon(undo.root,'trash',23,15,{material:'ink',accent:'paper',scale:.78,z:5});text(undo.root,`-${fmt(config.penalties.clearWordSeconds)}s`,23,29,{size:6.7,align:'center',material:'muted',z:5});
   const letterTimer=panel(submit.root,13,41,230,2,'ink',1,7,.25);
   letterTimer.visible=false;
   text(playing,'WORDS COLLECTED',22,561,{size:6.7,spacing:.5});
   const collection=button(playing,'collection','',20,553,320,49,{quiet:true});collection.label='View collected words';
 
-  // Small mesh labels stay inside the header, beside the values they update.
-  // The falling field and word tray remain unobstructed during rewards.
+  // Time remains beside the clock. Point badges travel from the submitted word
+  // to the score without adding hit targets or stopping the next selection.
   const rewardLayer=group(scene);
   function fadeMaterials(root){
     const clones=new Map();
@@ -209,30 +211,49 @@ export function createUI(font, config, reducedMotion=false) {
   }
   function setAlpha(list,alpha){for(const material of list){if(material.uniforms?.opacity)material.uniforms.opacity.value=alpha;else material.opacity=alpha;}}
   function removeCelebration(item){item.root.removeFromParent();for(const material of item.materials)material.dispose();}
+  function clearScoreFlights(){
+    for(const item of scoreFlights)removeCelebration(item);
+    scoreFlights.length=0;scoreLedger.reset();scoreSettleAge=Infinity;scoreAnchor.scale.setScalar(1);
+  }
+  function flightOrigin(word){
+    const width=Math.min(205,measure(word||'',24));
+    return {x:Math.min(281,89+width/2),y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-(currentLayout?.top||0)-119};
+  }
+  function addScoreFlight(result){
+    const flight=scoreLedger.add(result.points,{immediate:reducedMotion});if(!flight)return;
+    const root=group(rewardLayer,0,0,14),badge=group(root);
+    const label=`+${result.points}`,width=Math.max(32,measure(label,12)+17);
+    panel(badge,-width/2,-12,width,24,'cream',12,0,1.5);
+    text(badge,label,0,-6,{size:12,align:'center',material:'ink',raised:true,z:4});
+    const item={root,badge,materials:fadeMaterials(root),flight,word:result.word,from:flightOrigin(result.word),to:{x:232,y:47},lane:(flight.id%3)-1,reduced:reducedMotion};
+    // These are diagnostic scene labels, never interactive control targets.
+    root.userData.scoreFlight=flight;scoreFlights.push(item);animateScoreFlight(item);
+  }
+  function animateScoreFlight(item){
+    item.from=flightOrigin(item.word);
+    const pose=scoreFlightPose(item.flight,item.from,item.to,{reducedMotion:item.reduced,lane:item.lane});
+    item.badge.position.set(pose.x,-pose.y,0);item.badge.scale.setScalar(pose.scale);setAlpha(item.materials,pose.alpha);
+  }
   function celebrate(result,game){
-    meters.add(result.reward,result.points);
+    meters.add(result.reward,0);addScoreFlight(result);
     settleAge=0;resolvedWord=result.word||'';resolvedLetters=result.blankIndices||result.wildcardIndices||[...(result.pattern||result.submittedPattern||'')].flatMap((letter,index)=>letter==='?'?[index]:[]);
     if(result.isNew||result.isNewWord||result.isNewDiscovery||result.discovery?.isNew)sessionNewWords.add(result.word);
-    // Replace an earlier label instead of piling several rewards over the HUD.
+    // Time labels stay coalesced; point flights retain independent arrivals.
     for(const item of celebrations)removeCelebration(item);celebrations.length=0;
-    const root=group(rewardLayer),points=group(root,244,66,12),time=group(root,298,66,12);
-    text(points,`+${result.points}`,0,0,{size:9,align:'right',material:'muted',maxWidth:42});
+    const root=group(rewardLayer),time=group(root,298,66,12);
     text(time,result.reward>0?`+${fmt(result.reward)}s`:'MAX',0,0,{size:9,align:'right',material:'muted',maxWidth:42});
-    const pointMaterials=fadeMaterials(points),timeMaterials=fadeMaterials(time);
-    const ownedMaterials=[...pointMaterials,...timeMaterials];
-    const item={root,points,time,materials:ownedMaterials,pointMaterials,timeMaterials,age:0,result,startTime:meters.values(game.remaining,game.score).time};
-    celebrations.push(item);
-    animateCelebration(item);
+    const timeMaterials=fadeMaterials(time);
+    const item={root,time,materials:timeMaterials,timeMaterials,age:0,result,startTime:meters.values(game.remaining,game.score).time};
+    celebrations.push(item);animateCelebration(item);
   }
   function animateCelebration(item){
-    const {age,points,time}=item,duration=config.celebration.durationSeconds,t=clamp01(age/duration);
+    const {age,time}=item,duration=config.celebration.durationSeconds,t=clamp01(age/duration);
     const alpha=clamp01(t/.12)*(1-clamp01((t-.55)/.45));
     const rise=reducedMotion?0:2*easeOut(t);
-    points.position.y=time.position.y=-(66-rise);
-    setAlpha(item.pointMaterials,alpha);setAlpha(item.timeMaterials,alpha);
+    time.position.y=-(66-rise);setAlpha(item.timeMaterials,alpha);
   }
   function syncMeters(game){
-    const shown=reducedMotion?{time:game.remaining,score:game.score}:meters.values(game.remaining,game.score),timeRatio=shown.time/config.timer.startSeconds;
+    const shown={time:reducedMotion?game.remaining:meters.values(game.remaining,game.score).time,score:scoreLedger.value(game.score)},timeRatio=shown.time/config.timer.startSeconds;
     const extraCapacity=config.timer.maxSeconds-config.timer.startSeconds,inOvertime=shown.time>config.timer.startSeconds;
     timer.scale.x=Math.max(.001,Math.min(1,timeRatio));
     timer.material=materials[game.effects.hourglass>0?'mint':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
@@ -241,8 +262,10 @@ export function createUI(font, config, reducedMotion=false) {
     const timeLabel=inOvertime?`OVERTIME / ${Math.ceil(timeRatio*100)}%`:'TIME';
     slot('timeLabel',hud,timeLabel,g=>text(g,timeLabel,24,67,{size:6.2,material:'muted',spacing:.6}));
     slot('clock',clockAnchor,Math.ceil(shown.time),g=>text(g,`${Math.ceil(shown.time)}s`,0,0,{size:10,align:'right',raised:true}));
+    scoreAnchor.userData.displayedScore=shown.score;
     slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:17,align:'right'}));
-    slot('best',hud,lastBest,g=>text(g,String(lastBest).padStart(2,'0'),291,39,{size:17,align:'right'}));
+    const shownBest=['running','paused'].includes(game.phase)?Math.max(latestView.roundBest||0,Math.min(lastBest,shown.score)):lastBest;
+    slot('best',hud,shownBest,g=>text(g,String(shownBest).padStart(2,'0'),291,39,{size:17,align:'right'}));
     const latest=celebrations.at(-1),age=latest?.age??Infinity;
     recharge.visible=Boolean(!reducedMotion&&latest&&latest.result.reward>0&&age<1.15);
     if(recharge.visible){
@@ -318,7 +341,7 @@ export function createUI(font, config, reducedMotion=false) {
           ['Think a little bigger.',`3 letters restore up to ${fmt(config.rewards.threeLetterMaxSeconds)}s; 4 up to ${fmt(config.rewards.fourLetterMaxSeconds)}s. Longer words earn more time. Gold adds time, with normal points.`],
           ['A blank is a possibility.',`? can be any letter. It resolves only on submission and scores zero. Nothing reveals validity before you submit.`],
           ['Quick words buy thinking time.',`${config.combo.wordsToStart} quick words unlock a longer letter window, up to ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)}s. A miss, clear, repeat or ${fmt(config.combo.maxGapSeconds)}s gap resets the chain.`],
-          ['A slower moment. A little smoke.',`After ${fmt(config.specialTiles.warmupSeconds)}s, long words may drop an hourglass. Catch it for ${fmt(config.hourglass.durationSeconds)}s of slow time. Grenade letters release opaque smoke.`],
+          ['One tile. Two sides.',`After ${fmt(config.specialTiles.warmupSeconds)}s, long words may drop a spinning pickup. Tap the hourglass face for ${fmt(config.hourglass.durationSeconds)}s of slow time; the bomb face releases ${fmt(config.smoke.durationSeconds)}s of smoke.`],
         ];
         sections.forEach(([heading,body],i)=>{const y=153+i*57;text(g,heading,36,y,{size:8.6});lines(g,body,36,y+17,{width:286,size:6.6,lineHeight:10.4});});
         lines(g,`Clear or repeat: -${fmt(config.penalties.clearWordSeconds)}s. Impossible prefix or unfinished submit: -${fmt(config.penalties.invalidWordSeconds)}s.\nClear removes the whole word. Missing a tile is free.`,180,503,{width:286,size:6.3,lineHeight:11,align:'center'});
@@ -419,6 +442,7 @@ export function createUI(font, config, reducedMotion=false) {
     },
     get blocking(){return Boolean(mode);},
     sync(game,view) {
+      if(game.phase==='over'&&phase!=='over')clearScoreFlights();
       latestView=view;phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.max(0,Math.min(view.collectionPage||0,collectionPages-1));
       intro.visible=phase==='ready';playing.visible=phase!=='ready';modal.visible=Boolean(mode);
       hud.visible=true;
@@ -437,8 +461,8 @@ export function createUI(font, config, reducedMotion=false) {
       letterTimer.material=materials[game.effects.hourglass>0?'mint':'ink'];
       slot('word',playing,signature,g=>{
         text(g,game.current?`${fmt(game.letterWindow)}s / ADD LETTER OR AUTO-SUBMIT`:'PICK LETTERS IN ORDER',338,481,{size:5.8,align:'right',material:'muted',maxWidth:194});
-        if(game.current)text(g,game.current,35,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.bonus?'gold':'ink'),z:7});
-        else text(g,'Catch a few letters...',35,516,{size:9,material:'muted',maxWidth:211,z:7});
+        if(game.current)text(g,game.current,89,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.bonus?'gold':'ink'),z:7});
+        else text(g,'Catch a few letters...',89,516,{size:9,material:'muted',maxWidth:211,z:7});
       });
       const comboActive=game.comboBonusSeconds>0;
       slot('combo',playing,`${game.comboCount}:${game.nextLetterWindow}`,g=>{
@@ -489,14 +513,20 @@ export function createUI(font, config, reducedMotion=false) {
     focusNext(current,direction=1){const list=enabledControls();if(!list.length)return '';const at=list.findIndex(c=>c.id===current);return list[at<0?(direction>0?0:list.length-1):(at+direction+list.length)%list.length].id;},
     collectionPages(){return collectionPages;},
     wordbookPages(){return bookPages;},
-    setReducedMotion(value){reducedMotion=Boolean(value);if(reducedMotion)meters.reset();},
-    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+320,y:(currentLayout?.top||0)+87}:{x:(currentLayout?.left||0)+55+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-119};},
+    setReducedMotion(value){reducedMotion=Boolean(value);if(reducedMotion){meters.reset();clearScoreFlights();}},
+    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+320,y:(currentLayout?.top||0)+87}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-119};},
     press(action,now){lastPress=action;pressUntil=now+120;},
     celebrate,
-    reset(){for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();recharge.visible=false;settleAge=Infinity;resolvedWord='';resolvedLetters=[];sessionNewWords.clear();},
+    reset(){for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();clearScoreFlights();recharge.visible=false;settleAge=Infinity;resolvedWord='';resolvedLetters=[];sessionNewWords.clear();},
     animate(now,dt,game){
       const activeDt=game.phase==='running'?dt:0;
-      meters.advance(activeDt);settleAge+=activeDt;
+      meters.advance(activeDt);settleAge+=activeDt;scoreSettleAge+=activeDt;
+      const arrivals=scoreLedger.advance(activeDt);if(arrivals.length&&!reducedMotion)scoreSettleAge=0;
+      for(let i=scoreFlights.length-1;i>=0;i--){
+        const item=scoreFlights[i],end=item.reduced?.35:item.flight.duration;
+        if(item.flight.age+1e-9>=end){removeCelebration(item);scoreLedger.retire(item.flight.id);scoreFlights.splice(i,1);}else animateScoreFlight(item);
+      }
+      scoreAnchor.scale.setScalar(reducedMotion?1:1+.055*Math.sin(Math.PI*clamp01(scoreSettleAge/.16)));
       if(latestRecentRoot)latestRecentRoot.position.y=-579+(reducedMotion?0:1.5*(1-easeOut(settleAge/successSeconds)));
       for(let i=celebrations.length-1;i>=0;i--){
         const item=celebrations[i];item.age+=activeDt;
@@ -514,7 +544,7 @@ export function createUI(font, config, reducedMotion=false) {
       if(mode==='search')return `Search your Wordbook. Query: ${view.wordbookQuery||'empty'}. Use the letter buttons or your keyboard, then Show matching words.`;
       if(mode==='goals')return `Optional goals. ${view.book?.goal?`${view.book.goal.title}: ${view.book.goal.current} of ${view.book.goal.target}.`:'No goal selected.'} No deadlines or score bonuses.`;
       if(mode==='stats'){const personal=view.book?.stats?.personal||{};return view.statsView==='recent'?`Recent play. ${Math.floor(personal.observedSeconds||0)} seconds observed in your latest 20 minutes of active play. Distinct words played without wildcards: ${[5,6,7].map(length=>`${length} letters: ${personal.distinctByLength?.[length]||0}`).join(', ')}. Each word counts once in this window. ${personal.complete?'Full window.':'The window is still filling.'} Community comparison unavailable: not enough real player data yet.`:`Personal progress. ${view.book?.totalWords||0} different words discovered. ${view.book?.stats?.roundsPlayed||0} ${(view.book?.stats?.roundsPlayed||0)===1?'round':'rounds'} played. Best score ${view.book?.stats?.bestScore||view.best||0}. Community comparison unavailable: not enough real player data yet.`;}
-      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. The letter countdown starts at ${fmt(config.rules.nextLetterSeconds)} seconds. On expiry, a valid unused word submits automatically; an unfinished word is discarded for a ${fmt(config.penalties.clearWordSeconds)} second penalty. Repeats still cost time. ${config.combo.enabled?`${config.combo.wordsToStart} consecutive words less than ${fmt(config.combo.maxGapSeconds)} active seconds apart unlock a combo, adding ${fmt(config.combo.extraSecondsPerWord)} seconds per further word, capped at ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)} seconds per letter. Any failed or discarded word, or a gap of ${fmt(config.combo.maxGapSeconds)} seconds without a word, resets the combo.`:''} Pausing freezes both timers. The hourglass slows the letter countdown along with the round clock; combo expiry still uses active real time. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop an hourglass for ${fmt(config.hourglass.durationSeconds)} seconds of slow time. Grenade letters release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
+      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. The letter countdown starts at ${fmt(config.rules.nextLetterSeconds)} seconds. On expiry, a valid unused word submits automatically; an unfinished word is discarded for a ${fmt(config.penalties.clearWordSeconds)} second penalty. Repeats still cost time. ${config.combo.enabled?`${config.combo.wordsToStart} consecutive words less than ${fmt(config.combo.maxGapSeconds)} active seconds apart unlock a combo, adding ${fmt(config.combo.extraSecondsPerWord)} seconds per further word, capped at ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)} seconds per letter. Any failed or discarded word, or a gap of ${fmt(config.combo.maxGapSeconds)} seconds without a word, resets the combo.`:''} Pausing freezes both timers. The hourglass slows the letter countdown along with the round clock; combo expiry still uses active real time. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Special tiles unlock after ${fmt(config.specialTiles.warmupSeconds)} active seconds. Some five-letter or longer words drop a two-sided pickup rotating around Y. Tap its visible hourglass face for ${fmt(config.hourglass.durationSeconds)} seconds of slow time, or its smoke bomb face for ${fmt(config.smoke.durationSeconds)} seconds of smoke. An edge-on tap does not consume it. Letter tiles never release smoke. Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
       return `${phase==='ready'?'CLTTR. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindow)} seconds.`:''}${game.comboCount?` ${game.comboBonusSeconds>0?'Combo':'Chain'} ${game.comboCount}. Next-letter window ${fmt(game.nextLetterWindow)} seconds. Chain expires in ${Math.ceil(game.comboSeconds)} seconds.`:''} Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
