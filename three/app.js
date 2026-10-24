@@ -199,7 +199,7 @@ try{
   scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score is saved.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
   const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
-  tiles=[...'CLTRRD'].map((letter,i)=>({...makeTile(letter,positions[i][0],positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
+  tiles=[...'clttr'].map((letter,i)=>({...makeTile(letter,positions[i][0],positions[i][1]),tilt:positions[i][2],bonus:i===2,grenade:false}));
   sync();updateLabel();let previous=performance.now();
   function frame(now){
     const dt=Math.min((now-previous)/1000,.05);previous=now;handle(game.advance(now));
@@ -219,6 +219,6 @@ try{
   requestAnimationFrame(frame);
 }catch(error){
   console.error(error);
-  document.getElementById('scene').setAttribute('aria-label','CLTRRD could not load. Refresh in a browser with WebGL enabled.');
-  document.title='CLTRRD — unable to load the 3D scene';
+  document.getElementById('scene').setAttribute('aria-label','clttr could not load. Refresh in a browser with WebGL enabled.');
+  document.title='clttr — unable to load the 3D scene';
 }

@@ -1,8 +1,8 @@
 {
-  "name": "cltrrd",
+  "name": "clttr",
   "version": "2.0.0",
   "private": true,
-  "description": "CLTRRD \u2014 a portrait word game with two-tone Three.js tiles.",
+  "description": "clttr \u2014 a portrait word game with two-tone Three.js tiles.",
   "scripts": {
     "start": "node scripts/serve.cjs",
     "dev": "node scripts/serve.cjs",

@@ -1,4 +1,4 @@
-# CLTRRD
+# clttr
 
 A 9:16 mobile word game rendered entirely in **Three.js 0.186.1**. Falling tiles, raised letters, icons, the timer, scores, buttons, the word tray, word collection, feedback, and every menu are Three.js meshes. One WebGL canvas draws the game. There are no HTML overlays, DOM buttons, HTML-to-texture captures, or CSS2D/CSS3D renderers.
 
@@ -94,7 +94,7 @@ The Three.js version uses projected oriented-box collision detection with a two-
 - `three/tile-layout.mjs`: separate, scale-aware zones for the main glyph, time multiplier, grenade, and point value; each object is fitted from its actual mesh bounds.
 - `three/icons.js`: one consistent set of modeled arrows, Undo, pause, audio, hourglass, and grenade icons.
 - `three/scene.js`: actual extruded tile/letter geometry, modeled icons, shared geometry, particles, field clipping, raycasting, and WebGL rendering.
-- `three/ui.js`: mesh text, modeled controls, timer, menus, collection pagination, keyboard-focus marker, and UI raycasts. Text is extruded font geometry, not a bitmap or HTML texture. Beveled plinths, layered button caps, soft contact shadows, and a recessed timer give the interface depth. CLTRRD sits at the top, the timer directly beneath it, then the falling field. The former top slogan and gameplay footer are removed.
+- `three/ui.js`: mesh text, modeled controls, timer, menus, collection pagination, keyboard-focus marker, and UI raycasts. Text is extruded font geometry, not a bitmap or HTML texture. Beveled plinths, layered button caps, soft contact shadows, and a recessed timer give the interface depth. clttr sits at the top, the timer directly beneath it, then the falling field. The former top slogan and gameplay footer are removed.
 - `three/app.js`: input and round presentation; it reuses the original pure rule engine.
 - `three/style.css`: only canvas sizing and page placement. No game graphics are styled with CSS.
 
