@@ -144,38 +144,43 @@ export function iceWaveCoverage(progress,x,y){
   return 1-smooth(front-ICE_WAVE.feather,front+ICE_WAVE.feather,y);
 }
 
-export function iceTintMaterial(){
+export function fireWaveCoverage(progress,x,y){return iceWaveCoverage(progress,x,1-y);}
+
+function thermalTintMaterial(fire=false){
   return new THREE.ShaderMaterial({
     depthWrite:false,depthTest:false,
     uniforms:{
-      source:{value:null},tint:{value:new THREE.Color(DESIGN.palette.iceTint)},
-      dark:{value:new THREE.Color(DESIGN.palette.iceInk[0])},
-      light:{value:new THREE.Color(DESIGN.palette.ice[0])},
-      opacity:{value:0},progress:{value:0},strength:{value:.92},
+      source:{value:null},tint:{value:new THREE.Color(fire?DESIGN.palette.fireTint:DESIGN.palette.iceTint)},
+      dark:{value:new THREE.Color(fire?DESIGN.palette.fireInk[0]:DESIGN.palette.iceInk[0])},
+      light:{value:new THREE.Color(fire?DESIGN.palette.fireGlow:DESIGN.palette.ice[0])},
+      opacity:{value:0},progress:{value:0},strength:{value:fire?.86:.92},reverse:{value:fire?1:0},
     },
     vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
     fragmentShader:`varying vec2 vUv;uniform sampler2D source;
-      uniform vec3 tint,dark,light;uniform float opacity,progress,strength;
+      uniform vec3 tint,dark,light;uniform float opacity,progress,strength,reverse;
       void main(){
         // The source is linear light. Preserve the letters' contrast while
-        // replacing warm hues throughout the field with the ice tile palette.
+        // mapping the field into the active cold or warm palette.
         vec3 original=texture2D(source,vUv).rgb;
         float luminance=dot(original,vec3(.2126,.7152,.0722));
         vec3 frozen=mix(dark,tint,smoothstep(.015,.62,luminance));
         frozen=mix(frozen,light,smoothstep(.58,.98,luminance));
         float eased=progress*progress*(3.-2.*progress);
         float front=mix(${ICE_WAVE.start},${ICE_WAVE.end},eased)+sin(vUv.x*${ICE_WAVE.frequency})*${ICE_WAVE.ripple};
-        float wave=1.-smoothstep(front-${ICE_WAVE.feather},front+${ICE_WAVE.feather},vUv.y);
+        float waveY=mix(vUv.y,1.-vUv.y,reverse);
+        float wave=1.-smoothstep(front-${ICE_WAVE.feather},front+${ICE_WAVE.feather},waveY);
         float fade=opacity*opacity*(3.-2.*opacity);
         gl_FragColor=vec4(mix(original,frozen,wave*fade*strength),1.);
         #include <colorspace_fragment>
       }`,
   });
 }
+export function iceTintMaterial(){return thermalTintMaterial();}
+export function fireTintMaterial(){return thermalTintMaterial(true);}
 
 // Seconds here are real active seconds, independent of the slowed game clock.
 // Continuing active frames preserve the rising wave; blocked pickups never restart it.
-export function stepIceWave(state,{active,paused=false,reducedMotion=false,interrupted=false,delta=0}){
+export function stepThermalWave(state,{active,paused=false,reducedMotion=false,interrupted=false,delta=0}){
   if(interrupted){state.opacity=0;state.progress=0;return state;}
   if(paused)return state;
   const dt=Number.isFinite(delta)?Math.max(0,delta):0;
@@ -189,6 +194,7 @@ export function stepIceWave(state,{active,paused=false,reducedMotion=false,inter
   }
   return state;
 }
+export const stepIceWave=stepThermalWave;
 
 export function createIceSnow(count=96,random=Math.random){
   return Array.from({length:count},()=>({
@@ -198,11 +204,12 @@ export function createIceSnow(count=96,random=Math.random){
   }));
 }
 
-export function stepIceSnow(state,{visible,paused=false,reducedMotion=false,delta=0}){
+export function stepThermalParticles(state,{visible,paused=false,reducedMotion=false,delta=0}){
   if(!visible){state.time=0;return state;}
   if(!paused&&!reducedMotion&&Number.isFinite(delta))state.time+=Math.max(0,delta);
   return state;
 }
+export const stepIceSnow=stepThermalParticles;
 
 export function iceSnowPose(flake,{width,height,time,progress,opacity}){
   const wrap=value=>((value%1)+1)%1;
@@ -226,6 +233,45 @@ export function iceSnowMaterial(){
       void main(){
         float softFlake=1.-smoothstep(.08,.5,length(gl_PointCoord-.5));
         gl_FragColor=vec4(color,vAlpha*softFlake);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
+export function createFireEmbers(count=72,random=Math.random){
+  return Array.from({length:count},(_,index)=>({
+    x:random(),y:random(),phase:random()*Math.PI*2,
+    drift:4+random()*7,speed:18+random()*18,
+    // A few readable streaks sit among the tiny embers, keeping the cue clear
+    // on phone displays without filling the field with large particles.
+    size:index%4===0?7.5+random()*3:2.5+random()*3.2,
+    opacity:index%4===0?.82+random()*.16:.50+random()*.35,
+  }));
+}
+
+export function fireEmberPose(ember,{width,height,time,progress,opacity}){
+  const wrap=value=>((value%1)+1)%1;
+  const x=wrap(ember.x+Math.sin(time*.6+ember.phase)*ember.drift/width);
+  const y=wrap(ember.y+time*ember.speed/height);
+  const coverage=fireWaveCoverage(progress,x,y);
+  const glow=.78+.22*Math.sin(time*.9+ember.phase);
+  const alpha=ember.opacity*glow*smooth(.12,.88,coverage)*smooth(0,1,opacity);
+  return {x:x*width,y:y*height,alpha};
+}
+
+export function fireEmberMaterial(){
+  return new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,depthTest:false,
+    uniforms:{color:{value:new THREE.Color(DESIGN.palette.fire[1])},hot:{value:new THREE.Color(DESIGN.palette.fire[0])},pointScale:{value:1}},
+    vertexShader:`attribute float size,alpha;varying float vAlpha;uniform float pointScale;
+      void main(){vAlpha=alpha;gl_PointSize=size*pointScale;
+        gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader:`varying float vAlpha;uniform vec3 color,hot;
+      void main(){
+        float distance=length((gl_PointCoord-.5)*vec2(1.4,.8));
+        float core=1.-smoothstep(.06,.25,distance);
+        float glow=1.-smoothstep(.06,.5,distance);
+        gl_FragColor=vec4(mix(color,hot,core),vAlpha*glow);
         #include <colorspace_fragment>
       }`,
   });

@@ -76,7 +76,7 @@ test('special progression milestones are ordered, configurable positive word cou
 test('selecting a colored letter adds the letter and triggers only its own effect immediately',()=>{
  for(const effect of ['smoke','hourglass','fire']){
    const game=make(),result=game.select('C',0,{effect,bonus:true});
-   const duration=effect==='hourglass'?7.5:5;
+   const duration=effect==='smoke'?5:7.5;
    assert.equal(result.type,'letter');assert.deepEqual(result.tileEffect,{effect,duration});
    assert.equal(game.current,'C');assert.equal(game.currentTiles[0].effect,effect);assert.equal(game.currentTiles[0].bonus,false);assert.equal(result.goldCollected,undefined);
    assert.equal(game.effects[effect],duration);assert.equal(game.effects[effect==='smoke'?'hourglass':'smoke'],0);

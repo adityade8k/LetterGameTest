@@ -41,6 +41,9 @@ export function createUI(font, config, reducedMotion=false) {
   const point = (x, y, z = 0) => new THREE.Vector3(x - 180, 320 - y, z);
   const fmt = n => String(Number(n.toFixed(2)));
   const {nextLetterSeconds,extensionAfterLength,extensionSecondsPerLetter}=config.rules;
+  const sixLetterTarget=Math.min(config.rewards.sixLetterTargetSeconds,config.timer.maxSeconds);
+  const overtimePercent=Math.round(config.timer.overtimeMultiplier*100);
+  const timeRewardCopy=`Six-letter words refill to ${fmt(sixLetterTarget)} seconds, or add ${fmt(config.rewards.sixLetterBonusSeconds)} seconds when above ${fmt(sixLetterTarget)}. Seven-letter words refill the normal bar without reducing overtime. Eight or more letters refill to ${overtimePercent}% overtime. All rewards stop at ${fmt(config.timer.maxSeconds*config.timer.overtimeMultiplier)} seconds.`;
   const letterTimingCopy=extensionSecondsPerLetter>0?`First ${extensionAfterLength} letters: ${fmt(nextLetterSeconds)}s each. Letter ${extensionAfterLength+1}: ${fmt(nextLetterSeconds+extensionSecondsPerLetter)}s; letter ${extensionAfterLength+2}: ${fmt(nextLetterSeconds+extensionSecondsPerLetter*2)}s. Then +${fmt(extensionSecondsPerLetter)}s per letter.`:`Each letter gives ${fmt(nextLetterSeconds)} seconds.`;
   // Guard presentation-only timings without changing any game clock.
   const presentationSeconds=(value,fallback)=>Number.isFinite(value)&&value>0?Math.max(.05,Math.min(2,value)):fallback;
@@ -180,12 +183,15 @@ export function createUI(font, config, reducedMotion=false) {
   const scoreAnchor=group(hud,137,13);
   const pause=button(hud,'pause','',298,6,44,44,{iconName:'pause',round:true});
   pause.label='Pause game';
-  panel(hud,18,49,324,3,'edge',1.5,2,.4);
-  const timer=panel(hud,19,49.5,322,2,'ink',1,4,.4);
+  // A dedicated, recessed rail clears the score and pause controls. Its fill
+  // remains the normal clock color during fire: only the letters speed up.
+  const timerTrack=panel(hud,18,60,324,10,'edge',5,2,1);
+  timerTrack.userData.roundTimeTrack=true;
+  const timer=panel(hud,20,61,320,8,'ink',4,4,.6);
   timer.userData.roundTimeBar=true;
-  const overtime=panel(hud,19,49.5,322,2,'gold',1,5.4,.4);
-  overtime.visible=false;
-  const recharge=panel(hud,19,49,322,3,'mint',1.5,6.5,.4);
+  const overtime=panel(hud,20,61,320,8,'gold',4,5.4,.6);
+  overtime.userData.overtimeBar=true;overtime.visible=false;
+  const recharge=panel(hud,20,61,320,8,'mint',4,6.5,.4);
   recharge.material=materials.mint.clone();recharge.material.transparent=true;recharge.material.depthWrite=false;recharge.visible=false;
 
   const settingsButton=button(homeHud,'settings','',298,8,44,44,{iconName:'gear',round:true});
@@ -299,8 +305,8 @@ export function createUI(font, config, reducedMotion=false) {
     meters.add(result.reward,0);addScoreFlight(result);
     // Time labels stay coalesced; point flights retain independent arrivals.
     for(const item of celebrations)removeCelebration(item);celebrations.length=0;
-    const root=group(rewardLayer),time=group(root,280,25,12);
-    text(time,result.reward>0?`+${fmt(result.reward)}s`:'MAX',0,0,{size:9,align:'right',material:'muted',maxWidth:42});
+    const root=group(rewardLayer),time=group(root,224,39,12);time.userData.timeReward=true;
+    text(time,result.reward>0?`+${fmt(result.reward)}s`:'MAX',0,0,{size:8,align:'center',material:'muted',maxWidth:104});
     const reveal=group(root,180,522,10);reveal.userData.resolvedWord=result.word;
     const blanks=new Set(result.blankIndices||result.wildcardIndices||[...(result.pattern||result.submittedPattern||'')].flatMap((letter,index)=>letter==='?'?[index]:[]));
     text(reveal,result.word||'',0,0,{size:12,align:'center',maxWidth:288,colors:[...(result.word||'')].map((_,i)=>blanks.has(i)?'goldInk':'ink'),raised:true});
@@ -312,26 +318,30 @@ export function createUI(font, config, reducedMotion=false) {
     const {age,time}=item,duration=config.celebration.durationSeconds,t=clamp01(age/duration);
     const alpha=clamp01(t/.12)*(1-clamp01((t-.55)/.45));
     const rise=reducedMotion?0:2*easeOut(t);
-    time.position.y=-(25-rise);setAlpha(item.timeMaterials,alpha);
+    time.position.y=-(39-rise);setAlpha(item.timeMaterials,alpha);
     item.reveal.visible=age<discoverySeconds;
     item.reveal.position.y=-((currentLayout?.height||640)-(currentLayout?.bottom||0)-(currentLayout?.top||0)-118)+(reducedMotion?0:2*(1-easeOut(clamp01(age/successSeconds))));
     setAlpha(item.revealMaterials,1-clamp01((age-discoverySeconds*.65)/(discoverySeconds*.35)));
   }
   function syncMeters(game){
-    const shown={time:reducedMotion?game.remaining:meters.values(game.remaining,game.score).time,score:scoreLedger.value(game.score)},timeRatio=shown.time/config.timer.startSeconds;
-    const extraCapacity=config.timer.maxSeconds-config.timer.startSeconds,inOvertime=shown.time>config.timer.startSeconds;
+    const shown={time:reducedMotion?game.remaining:meters.values(game.remaining,game.score).time,score:scoreLedger.value(game.score)},normalCapacity=config.timer.maxSeconds,timeRatio=shown.time/normalCapacity;
+    const extraCapacity=game.maxTimeSeconds-normalCapacity,inOvertime=shown.time>normalCapacity;
     timer.scale.x=Math.max(.001,Math.min(1,timeRatio));
-    timer.material=materials[game.effects.hourglass>0?'ice':game.effects.fire>0?'fire':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
+    timer.material=materials[game.effects.hourglass>0?'ice':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
     overtime.visible=inOvertime&&extraCapacity>0;
-    overtime.scale.x=Math.max(.001,Math.min(1,(shown.time-config.timer.startSeconds)/Math.max(.001,extraCapacity)));
+    overtime.scale.x=Math.max(.001,Math.min(1,(shown.time-normalCapacity)/Math.max(.001,extraCapacity)));
+    const shownOvertime=overtime.visible?Math.ceil(timeRatio*100):0;
+    slot('overtime',hud,shownOvertime,g=>{
+      if(shownOvertime){g.userData.overtimeLabel=true;text(g,`OVERTIME ${shownOvertime}%`,224,20,{size:7.8,align:'center',material:'goldInk',maxWidth:130});}
+    });
     scoreAnchor.userData.displayedScore=shown.score;
     slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:22,align:'right',maxWidth:91}));
     const latest=celebrations.at(-1),age=latest?.age??Infinity;
     recharge.visible=Boolean(!reducedMotion&&latest&&latest.result.reward>0&&age<1.15);
     if(recharge.visible){
-      const base=inOvertime?config.timer.startSeconds:0,range=inOvertime?extraCapacity:config.timer.startSeconds;
+      const base=inOvertime?normalCapacity:0,range=inOvertime?extraCapacity:normalCapacity;
       const from=clamp01((latest.startTime-base)/range),to=clamp01((shown.time-base)/range);
-      recharge.position.x=19+from*322;recharge.scale.x=Math.max(.001,to-from);
+      recharge.position.x=20+from*320;recharge.scale.x=Math.max(.001,to-from);
       recharge.material.uniforms.opacity.value=.28*(1-clamp01((age-.4)/.75));
     }
   }
@@ -407,8 +417,8 @@ export function createUI(font, config, reducedMotion=false) {
           ['Catch letters. Make words.',`Tap letters in order. Tap the paper plane to submit ${config.rules.minWordLength} or more letters.`],
           ['Longer words, more thinking time.',letterTimingCopy],
           ['Watch your word bar.',`When it runs out, a valid word submits for you. Unfinished words clear. Words you already scored earn 0 points, with no time penalty.`],
-          ['Keep the round going.',`New words add time. Longer words earn more. A ? stands for any letter and finds its match when you submit.`],
-          ['Meet a little magic.',`${config.specialTiles.goldUnlockWords} words: gold doubles your word score. ${config.specialTiles.iceUnlockWords} words: ice slows time. ${config.specialTiles.smokeUnlockWords} words: magenta brings smoke. ${config.specialTiles.fireUnlockWords} words: fire speeds up play for ${fmt(config.fire.durationSeconds)}s. Only one timed effect can run at once.`],
+          ['Keep the round going.',`6 letters: refill to ${fmt(sixLetterTarget)}s, or +${fmt(config.rewards.sixLetterBonusSeconds)}s above it. 7: a full bar. 8+: ${overtimePercent}% overtime. A ? matches any letter.`],
+          ['Meet a little magic.',`${config.specialTiles.goldUnlockWords} words: gold doubles your word score. ${config.specialTiles.iceUnlockWords} words: ice slows time. ${config.specialTiles.smokeUnlockWords} words: magenta brings smoke. ${config.specialTiles.fireUnlockWords} words: fire speeds up letters for ${fmt(config.fire.durationSeconds)}s; clocks stay normal. Only one timed effect can run at once.`],
         ];
         sections.forEach(([heading,body],i)=>{const y=151+i*70;text(g,heading,36,y,{size:10});lines(g,body,36,y+20,{width:286,size:7.5,lineHeight:12});});
         text(g,`Clear: -${fmt(config.penalties.clearWordSeconds)}s. Invalid word: -${fmt(config.penalties.invalidWordSeconds)}s.`,180,520,{size:6.8,align:'center',material:'muted'});
@@ -503,7 +513,7 @@ export function createUI(font, config, reducedMotion=false) {
       if(!currentLayout)return false;
       if(overlapsPanel(x,y,currentLayout,margin))return true;
       const localX=x-currentLayout.left,localY=y-currentLayout.top;
-      return effectsVisible&&localX>137-margin&&localX<223+margin&&localY>61-margin&&localY<83+margin;
+      return effectsVisible&&localX>137-margin&&localX<223+margin&&localY>86-margin&&localY<108+margin;
     },
     get blocking(){return Boolean(mode);},
     sync(game,view) {
@@ -518,7 +528,7 @@ export function createUI(font, config, reducedMotion=false) {
       const signature=game.current+game.currentTiles.map(t=>`${t.blank?'?':t.bonus?'1':'0'}:${t.effect||''}`).join('')+phase+':'+game.letterWindow;
       letterTimer.visible=Boolean(game.current)&&phase!=='over';
       letterTimer.scale.x=Math.max(.001,game.letterSeconds/game.letterWindow);
-      letterTimer.material=materials[game.effects.hourglass>0?'ice':game.effects.fire>0?'fire':'ink'];
+      letterTimer.material=materials[game.effects.hourglass>0?'ice':'ink'];
       slot('word',submit.face,signature,g=>{
         if(game.current)text(g,game.current,13,12,{size:24,maxWidth:184,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.effect==='smoke'?'smoke':t.effect==='hourglass'?'iceInk':t.effect==='fire'?'fireInk':t.bonus?'goldInk':'letterInk'),z:7});
         else text(g,'Catch letters...',13,22,{size:10,material:'muted',maxWidth:184,z:7});
@@ -528,7 +538,7 @@ export function createUI(font, config, reducedMotion=false) {
       const smoke=game.effects.smoke>0;
       effectsVisible=phase==='running'&&smoke;status.visible=phase!=='ready';
       slot('effects',status,smoke,g=>{
-        if(smoke){panel(g,137,61,86,22,'smoke',11);text(g,'SMOKE',180,68,{size:6.7,align:'center',material:'smokeInk'});}
+        if(smoke){panel(g,137,86,86,22,'smoke',11);text(g,'SMOKE',180,93,{size:6.7,align:'center',material:'smokeInk'});}
       });
       slot('feedback',playing,`${view.feedback}:${view.feedbackKind}`,g=>{
         if(view.feedback)lines(g,view.feedback,180,522,{width:300,size:7.3,lineHeight:12,align:'center',material:view.feedbackKind==='bad'?'danger':'ink'});
@@ -553,7 +563,7 @@ export function createUI(font, config, reducedMotion=false) {
     collectionPages(){return collectionPages;},
     wordbookPages(){return bookPages;},
     setReducedMotion(value){reducedMotion=Boolean(value);if(reducedMotion){meters.reset();clearScoreFlights();}},
-    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+180,y:(currentLayout?.top||0)+50}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-59};},
+    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+180,y:(currentLayout?.top||0)+65}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-59};},
     press(action,now){lastPress=action;pressUntil=now+120;},
     celebrate,
     reset(){clearGoldCelebration();for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();clearScoreFlights();recharge.visible=false;},
@@ -587,10 +597,10 @@ export function createUI(font, config, reducedMotion=false) {
       if(mode==='search')return `Search your Wordbook. Query: ${view.wordbookQuery||'empty'}. Use the letter buttons or your keyboard, then Show matching words.`;
       if(mode==='goals')return `Optional goals. ${view.book?.goal?`${view.book.goal.title}: ${view.book.goal.current} of ${view.book.goal.target}.`:'No goal selected.'} No deadlines or score bonuses.`;
       if(mode==='stats'){const personal=view.book?.stats?.personal||{};return view.statsView==='recent'?`Recent play. ${Math.floor(personal.observedSeconds||0)} seconds observed in your latest 20 minutes of active play. Distinct words played without wildcards: ${[5,6,7].map(length=>`${length} letters: ${personal.distinctByLength?.[length]||0}`).join(', ')}. Each word counts once in this window. ${personal.complete?'Full window.':'The window is still filling.'}`:`Personal progress. ${view.book?.totalWords||0} different words discovered. ${view.book?.stats?.roundsPlayed||0} ${(view.book?.stats?.roundsPlayed||0)===1?'round':'rounds'} played. Best score ${view.book?.stats?.bestScore||view.best||0}.`;}
-      if(mode==='help')return `How to Play. Tap letters in order and submit ${config.rules.minWordLength} or more letters. ${letterTimingCopy} When the letter bar expires, a valid word submits automatically. Repeated words earn 0 points with no time penalty. New words add time; longer words earn more. A blank ? resolves when you submit and scores zero. Pausing freezes both timers. Gold tiles first appear after ${config.specialTiles.goldUnlockWords} words and double the word score. Ice tiles first appear after ${config.specialTiles.iceUnlockWords} scored words and slow time for ${fmt(config.hourglass.durationSeconds)} seconds. Magenta smoke tiles appear after ${config.specialTiles.smokeUnlockWords} words and pulse when ready to burst. Fire tiles appear after ${config.specialTiles.fireUnlockWords} words and make falling letters, rotation, arrivals and both timers ${fmt(config.fire.timeScale)} times faster for ${fmt(config.fire.durationSeconds)} seconds. Only one timed effect can run at once. Each round resets these milestones. ${config.difficulty.enabled?`Letter Y spin starts at zero, ramps up over ${fmt(config.difficulty.rampSeconds)} active seconds, then smoothly rises and falls randomly within its speed limits.`:'Letter Y spin stays at zero.'} Clear costs ${fmt(config.penalties.clearWordSeconds)} seconds; invalid words cost ${fmt(config.penalties.invalidWordSeconds)} seconds.`;
+      if(mode==='help')return `How to Play. Tap letters in order and submit ${config.rules.minWordLength} or more letters. ${letterTimingCopy} When the letter bar expires, a valid word submits automatically. Repeated words earn 0 points with no time penalty. New words add time. ${timeRewardCopy} A blank ? resolves when you submit and scores zero. Pausing freezes both timers. Gold tiles first appear after ${config.specialTiles.goldUnlockWords} words and double the word score. Ice tiles first appear after ${config.specialTiles.iceUnlockWords} scored words and slow time for ${fmt(config.hourglass.durationSeconds)} seconds. Magenta smoke tiles appear after ${config.specialTiles.smokeUnlockWords} words and pulse when ready to burst. Fire tiles appear after ${config.specialTiles.fireUnlockWords} words and make falling letters, rotation and arrivals ${fmt(config.fire.worldTimeScale)} times faster for ${fmt(config.fire.durationSeconds)} seconds. Both timers keep their normal pace during fire. Only one timed effect can run at once. Each round resets these milestones. ${config.difficulty.enabled?`Letter Y spin starts at zero, ramps up over ${fmt(config.difficulty.rampSeconds)} active seconds, then smoothly rises and falls randomly within its speed limits.`:'Letter Y spin stays at zero.'} Clear costs ${fmt(config.penalties.clearWordSeconds)} seconds; invalid words cost ${fmt(config.penalties.invalidWordSeconds)} seconds.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
-      return phase==='ready'?'CLTTR. Catch letters. Discover your next word.':`Score ${game.score}. Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindowSeconds)} seconds.`:''}${reward} ${view.feedback}${goldCelebration?' Double Score! This word earned twice the points.':''}`;
+      return phase==='ready'?'CLTTR. Catch letters. Discover your next word.':`Score ${game.score}.${game.remaining>config.timer.maxSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.maxSeconds*100)}%.`:''} Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindowSeconds)} seconds.`:''}${reward} ${view.feedback}${goldCelebration?' Double Score! This word earned twice the points.':''}`;
     },
   };
 }

@@ -173,7 +173,11 @@ test('help describes staged gold, ice, smoke and fire tile introductions',suppor
   assert.match(description,/Ice tiles first appear after 6 scored words/);
   assert.match(description,/Gold tiles first appear after 3 words/);
   assert.match(description,/Magenta smoke tiles appear after 10 words/);
-  assert.match(description,/Fire tiles appear after 12 words.*2 times faster for 5 seconds/);
+  assert.match(description,/Fire tiles appear after 12 words.*2.5 times faster for 7.5 seconds/);
+  assert.match(description,/Both timers keep their normal pace during fire/);
+  assert.match(description,/Six-letter words refill to 45 seconds, or add 10 seconds/);
+  assert.match(description,/Seven-letter words refill the normal bar without reducing overtime/);
+  assert.match(description,/Eight or more letters refill to 150% overtime/);
   assert.match(description,/Only one timed effect can run at once/);
   assert.match(description,/double.*word score/);
 });
@@ -264,4 +268,45 @@ test('help reflects configured letter timing and menu presses survive a rebuilt 
   view.mode='settings';sync();ui.press('setting:effects',1000);view.settings.effects=true;sync();ui.animate(1050,.05,game);
   let cap;ui.scene.traverse(o=>{if(o.userData.control?.id==='setting:effects')cap=o.parent;});assert.ok(cap);assert.equal(cap.position.y,-2.5);
   ui.animate(1200,.15,game);assert.equal(cap.position.y,0);
+});
+
+
+test('the round clock has its own prominent rail below controls and fire leaves clock colors unchanged',supported,async()=>{
+  const {ui,game,sync,THREE}=await create();game.start(0);game.select('C',0);sync();
+  const find=key=>{let found;ui.scene.traverse(o=>{if(o.userData[key])found=o;});return found;};
+  const timer=find('roundTimeBar'),track=find('roundTimeTrack');assert.ok(timer&&track);
+  ui.scene.updateMatrixWorld(true);const timerBox=new THREE.Box3().setFromObject(timer),trackBox=new THREE.Box3().setFromObject(track);
+  assert.ok(timerBox.max.y-timerBox.min.y>=8,'the round fill is readable at phone size');
+  for(const id of ['pause']){
+    let control;ui.scene.traverse(o=>{if(o.userData.control?.id===id)control=o.userData.control;});
+    const bounds=new THREE.Box3().setFromObject(control.face);
+    for(const part of control.root.children)if(part.visible&&part.isMesh&&part.geometry.type==='ExtrudeGeometry')bounds.expandByObject(part);
+    assert.ok(trackBox.max.y<bounds.min.y-3,'rail clears the pause cap and its foot');
+  }
+  const ordinaryMaterial=timer.material;game.effects.fire=7.5;sync();assert.equal(timer.material,ordinaryMaterial,'fire does not imply a faster clock');
+  game.effects.fire=0;game.effects.hourglass=7.5;sync();assert.notEqual(timer.material,ordinaryMaterial,'ice still indicates its slowed clock');
+  game.effects.hourglass=0;game.remaining=10;sync();assert.notEqual(timer.material,ordinaryMaterial,'low time remains prominent');
+});
+
+test('overtime has a separate gold excess meter and its label clears the reward and controls',supported,async()=>{
+  const {ui,game,view,sync,THREE}=await create();game.start(0);sync();
+  const find=key=>{let found;ui.scene.traverse(o=>{if(o.userData[key])found=o;});return found;};
+  const timer=find('roundTimeBar'),overtime=find('overtimeBar');
+  assert.equal(overtime.visible,false);assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME/);
+  game.remaining=75;sync();assert.equal(timer.scale.x,1);assert.equal(overtime.visible,true);assert.equal(overtime.scale.x,.5);
+  assert.match(visibleText(ui).join(' '),/OVERTIME 125%/);assert.match(ui.description(game,view),/Overtime 125%/);
+  game.remaining=90;ui.celebrate({type:'word',word:'ELEPHANT',points:20,reward:15},game);sync();ui.animate(100,.1,game);
+  assert.equal(overtime.scale.x,1);assert.match(visibleText(ui).join(' '),/OVERTIME 150%/);
+  ui.scene.updateMatrixWorld(true);const badge=new THREE.Box3().setFromObject(find('overtimeLabel')),reward=new THREE.Box3().setFromObject(find('timeReward'));
+  assert.ok(reward.max.y<badge.min.y-3,'the refill reward stays below the overtime label');
+  assert.ok(badge.min.x>-30&&badge.max.x<117,'overtime fits between score and pause');
+  game.remaining=60;sync();assert.equal(overtime.visible,false);assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME/);
+  assert.equal(timer.scale.x,1);game.remaining=30;sync();assert.equal(timer.scale.x,.5);
+});
+
+test('normal and overtime meter capacities follow configuration rather than the starting clock',supported,async()=>{
+  const {ui,game,sync}=await create({timer:{startSeconds:40,maxSeconds:80,overtimeMultiplier:1.5}});game.start(0);sync();
+  let timer,overtime;ui.scene.traverse(o=>{if(o.userData.roundTimeBar)timer=o;if(o.userData.overtimeBar)overtime=o;});
+  assert.equal(timer.scale.x,.5);game.remaining=100;sync();assert.equal(timer.scale.x,1);assert.equal(overtime.scale.x,.5);
+  assert.match(visibleText(ui).join(' '),/OVERTIME 125%/);
 });

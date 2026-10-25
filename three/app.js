@@ -182,8 +182,8 @@ function sync(){
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
-  const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (magenta, smoke)':tile.effect==='hourglass'?' (ice, slow time)':tile.effect==='fire'?' (fire, double speed)':''}${tile.bonus?' (gold, double score)':''}`).join(', ');
-  const effects=`${game.effects.fire>0?` Double speed: ${Math.ceil(game.effects.fire)} seconds.`:''}${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
+  const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (magenta, smoke)':tile.effect==='hourglass'?' (ice, slow time)':tile.effect==='fire'?` (fire, ${config.fire.worldTimeScale} times faster tiles)`:''}${tile.bonus?' (gold, double score)':''}`).join(', ');
+  const effects=`${game.effects.fire>0?` Faster tiles: ${Math.ceil(game.effects.fire)} seconds. Timers remain at normal speed.`:''}${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
   const label=`${description}${effects} ${view.mode||game.phase==='ready'?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; Escape pauses or resumes.`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
@@ -329,7 +329,7 @@ try{
     if(game.phase==='running'){
       if(game.elapsed-lastCheckpoint>=10)checkpoint();
       if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){sound('lowtime');lastLowWarning=game.elapsed;}
-      const worldDt=dt*game.timeScale;
+      const worldDt=dt*game.worldTimeScale;
       densityRamp.advance(worldDt,game.wordCount);
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});
       tiles=tiles.filter(tile=>tile.y<height+size);

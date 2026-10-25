@@ -178,3 +178,94 @@ test('snow remains within responsive playfields with slow physical drift and var
   const after=iceSnowPose(steady,{width:360,height:640,time:1,progress:1,opacity:1});
   assert.ok(Math.abs(before.y-after.y-8)<1e-9,'flakes fall only eight logical pixels in a second');
 });
+
+test('the fire compositor is visibly red and reverses only the reveal direction',supported,async()=>{
+  const [{fireTintMaterial,iceTintMaterial},{DESIGN}]=await Promise.all([import('../three/materials.js'),import('../three/design.js')]);
+  const fire=fireTintMaterial(),ice=iceTintMaterial();
+  assert.equal(`#${fire.uniforms.tint.value.getHexString()}`,DESIGN.palette.fireTint);
+  assert.equal(`#${fire.uniforms.light.value.getHexString()}`,DESIGN.palette.fireGlow);
+  assert.ok(fire.uniforms.tint.value.r>fire.uniforms.tint.value.g*5);
+  assert.ok(fire.uniforms.tint.value.r>fire.uniforms.tint.value.b*5);
+  assert.equal(fire.uniforms.reverse.value,1);assert.equal(ice.uniforms.reverse.value,0);
+  assert.equal(fire.fragmentShader,ice.fragmentShader,'the two effects share the same feathered wave');
+  assert.equal(fire.depthTest,false);assert.equal(fire.depthWrite,false);
+  assert.equal(fire.uniforms.source.value,null);
+  fire.dispose();ice.dispose();
+});
+
+test('the fire wave travels top to bottom while ice travels bottom to top',supported,async()=>{
+  const {fireWaveCoverage,iceWaveCoverage}=await import('../three/materials.js');
+  assert.equal(fireWaveCoverage(.5,.5,.85),1);assert.equal(fireWaveCoverage(.5,.5,.15),0);
+  assert.equal(iceWaveCoverage(.5,.5,.85),0);assert.equal(iceWaveCoverage(.5,.5,.15),1);
+  for(let column=0;column<=10;column++)for(let row=0;row<=10;row++){
+    const x=column/10,y=row/10;
+    assert.equal(fireWaveCoverage(0,x,y),0);assert.equal(fireWaveCoverage(1,x,y),1);
+    let previous=0;
+    for(let tick=0;tick<=20;tick++){
+      const progress=tick/20,value=fireWaveCoverage(progress,x,y);
+      assert.equal(value,iceWaveCoverage(progress,x,1-y));
+      assert.ok(value>=previous,'the fire reveal never retracts during onset');previous=value;
+    }
+  }
+});
+
+test('embers appear only inside the red region and fade with that region',supported,async()=>{
+  const {fireEmberPose,fireWaveCoverage}=await import('../three/materials.js');
+  const ember={x:0,y:.5,phase:Math.PI/2,drift:0,speed:0,opacity:.75};
+  const field={width:360,height:640,time:0,progress:.5,opacity:1};
+  assert.equal(fireEmberPose({...ember,y:.2},field).alpha,0,'no sparks below the advancing fire front');
+  assert.equal(fireEmberPose({...ember,y:.8},field).alpha,.75);
+  const edge=fireEmberPose(ember,field).alpha;assert.ok(edge>0&&edge<.75);
+  assert.equal(fireEmberPose(ember,{...field,progress:1,opacity:.5}).alpha,.375);
+  assert.equal(fireEmberPose(ember,{...field,progress:1,opacity:0}).alpha,0);
+  for(let column=0;column<10;column++)for(let row=0;row<10;row++){
+    const x=column/10,y=row/10;
+    for(let tick=0;tick<=20;tick++){
+      const progress=tick/20;
+      if(fireWaveCoverage(progress,x,y)===0)assert.equal(fireEmberPose({...ember,x,y},{...field,progress}).alpha,0);
+    }
+  }
+});
+
+test('fire and ice pause and dissolve normally but cannot leave mixed tint or particle tails after another effect',supported,async()=>{
+  const {stepThermalWave,stepThermalParticles}=await import('../three/materials.js');
+  const states={hourglass:{progress:0,opacity:0},fire:{progress:0,opacity:0}};
+  const clocks={hourglass:{time:0},fire:{time:0}};
+  function frame(activeEffect,delta,paused=false,reducedMotion=false){
+    for(const [effect,state] of Object.entries(states)){
+      stepThermalWave(state,{active:activeEffect===effect,interrupted:Boolean(activeEffect&&activeEffect!==effect),delta,paused,reducedMotion});
+      stepThermalParticles(clocks[effect],{visible:state.opacity>0,delta,paused,reducedMotion});
+    }
+  }
+  frame('fire',.6);assert.equal(states.fire.progress,.5);assert.equal(states.hourglass.opacity,0);
+  const paused=structuredClone({states,clocks});frame('fire',10,true);
+  assert.deepEqual({states,clocks},paused);
+  frame('fire',.6);assert.equal(states.fire.progress,1);
+  frame(null,.25);assert.equal(states.fire.opacity,.5,'ordinary fire expiry dissolves over half a second');
+  frame('hourglass',.12);assert.equal(states.fire.opacity,0);assert.equal(clocks.fire.time,0);
+  assert.ok(states.hourglass.progress>0&&states.hourglass.progress<1);
+  frame(null,.25);frame('fire',0,false,true);
+  assert.deepEqual(states.hourglass,{progress:0,opacity:0});assert.equal(clocks.hourglass.time,0);
+  assert.deepEqual(states.fire,{progress:1,opacity:1});assert.equal(clocks.fire.time,0,'reduced motion has no spark drift or shimmer');
+  frame('smoke',.1);assert.deepEqual(states.fire,{progress:0,opacity:0});assert.equal(clocks.fire.time,0);
+});
+
+test('embers rise gently and remain within narrow and tall responsive fields',supported,async()=>{
+  const {createFireEmbers,fireEmberPose}=await import('../three/materials.js');
+  let seed=41;const random=()=>{seed=(seed*16807)%2147483647;return(seed-1)/2147483646;};
+  const embers=createFireEmbers(undefined,random);assert.equal(embers.length,72);
+  assert.ok(new Set(embers.map(ember=>ember.size)).size>60);
+  assert.equal(embers.filter(ember=>ember.size>=7.5&&ember.opacity>=.82).length,18,'one quarter are brighter readable streaks');
+  for(const ember of embers){
+    assert.ok(ember.speed>=18&&ember.speed<=36);assert.ok(ember.size>=2.5&&ember.size<=10.5);
+    for(const [width,height] of [[320,568],[360,640],[420,900]])for(const time of [0,1,7.5,300]){
+      const pose=fireEmberPose(ember,{width,height,time,progress:1,opacity:1});
+      assert.ok(pose.x>=0&&pose.x<width&&pose.y>=0&&pose.y<height);
+      assert.ok(pose.alpha>=0&&pose.alpha<=ember.opacity);
+    }
+  }
+  const ember={x:.5,y:.5,phase:0,drift:0,speed:24,opacity:.7};
+  const before=fireEmberPose(ember,{width:360,height:640,time:0,progress:1,opacity:1});
+  const after=fireEmberPose(ember,{width:360,height:640,time:1,progress:1,opacity:1});
+  assert.ok(Math.abs(after.y-before.y-24)<1e-9,'embers rise, opposite the drifting snow');
+});

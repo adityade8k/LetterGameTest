@@ -210,14 +210,14 @@ test('rare ordinary letters still obey the three- and four-letter base time caps
 });
 
 
-test('configured overtime banks rewards up to 200 percent, then drains and restarts normally',()=>{
-  const game=create({timer:{maxSeconds:120}});
+test('a custom 120-second ceiling with overtime disabled honors refills, draining and restart',()=>{
+  const game=create({timer:{maxSeconds:120,overtimeMultiplier:1}});
   assert.equal(game.remaining,60);assert.equal(game.config.timer.maxSeconds,120);
   for(const word of ['CATCH','SMILE','STARE','FLOWER']){spell(game,word);game.submit(0);}
-  near(game.remaining,103.2);
-  spell(game,'FLOWERS');near(game.submit(0).reward,15.6);near(game.remaining,118.8);
+  near(game.remaining,98.8);
+  spell(game,'FLOWERS');near(game.submit(0).reward,21.2);near(game.remaining,120);
   spell(game,'PLANET');const capped=game.submit(0);
-  near(capped.reward,1.2);assert.equal(game.remaining,120);
+  near(capped.reward,0);assert.equal(game.remaining,120);
   spell(game,'CAT');assert.equal(game.submit(0).reward,0);assert.equal(game.remaining,120);
   game.advance(60000);assert.equal(game.remaining,60);assert.equal(game.phase,'running');
   game.advance(120000);assert.equal(game.remaining,0);assert.equal(game.phase,'over');

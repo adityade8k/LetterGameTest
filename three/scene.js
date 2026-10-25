@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
-import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, stepIceWave, createIceSnow, stepIceSnow, iceSnowPose, iceSnowMaterial } from './materials.js';
+import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, fireTintMaterial, stepThermalWave, createIceSnow, stepThermalParticles, iceSnowPose, iceSnowMaterial, createFireEmbers, fireEmberPose, fireEmberMaterial } from './materials.js';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout, fieldVeilBands } from './layout.mjs';
@@ -54,18 +54,23 @@ export async function createScene(host, config, reducedMotion) {
   materials.smokeTile=gasTileMaterial();
   materials.fire=specialTileMaterial('fire',config.tiles.mobileSize);
   materials.gold=specialTileMaterial('gold',config.tiles.mobileSize);
-  const tintMaterial=iceTintMaterial(),tintGeometry=new THREE.PlaneGeometry(360,640);
-  const frostTint=new THREE.Mesh(tintGeometry,tintMaterial);atmosphere.add(frostTint);
-  const iceWave={progress:0,opacity:0},drawingSize=new THREE.Vector2();
-  let iceTarget=null;
-  const snowFlakes=createIceSnow(),snowState={time:0},snowMaterial=iceSnowMaterial();
-  const snowGeometry=new THREE.BufferGeometry();
-  const snowPositions=new Float32Array(snowFlakes.length*3),snowAlphas=new Float32Array(snowFlakes.length);
-  snowGeometry.setAttribute('position',new THREE.BufferAttribute(snowPositions,3).setUsage(THREE.DynamicDrawUsage));
-  snowGeometry.setAttribute('alpha',new THREE.BufferAttribute(snowAlphas,1).setUsage(THREE.DynamicDrawUsage));
-  snowGeometry.setAttribute('size',new THREE.Float32BufferAttribute(snowFlakes.map(flake=>flake.size),1));
-  const snowPoints=new THREE.Points(snowGeometry,snowMaterial);
-  snowPoints.frustumCulled=false;snowPoints.renderOrder=1;atmosphere.add(snowPoints);
+  const tintGeometry=new THREE.PlaneGeometry(360,640),drawingSize=new THREE.Vector2();
+  let effectTarget=null;
+  function climateLayer(effect,material,particles,particleMaterial,pose){
+    const tint=new THREE.Mesh(tintGeometry,material);tint.visible=false;atmosphere.add(tint);
+    const geometry=new THREE.BufferGeometry();
+    const positions=new Float32Array(particles.length*3),alphas=new Float32Array(particles.length);
+    geometry.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('alpha',new THREE.BufferAttribute(alphas,1).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('size',new THREE.Float32BufferAttribute(particles.map(particle=>particle.size),1));
+    const points=new THREE.Points(geometry,particleMaterial);
+    points.frustumCulled=false;points.renderOrder=1;points.visible=false;atmosphere.add(points);
+    return {effect,material,tint,particles,particleMaterial,pose,geometry,positions,alphas,points,wave:{progress:0,opacity:0},clock:{time:0}};
+  }
+  const climateLayers=[
+    climateLayer('hourglass',iceTintMaterial(),createIceSnow(),iceSnowMaterial(),iceSnowPose),
+    climateLayer('fire',fireTintMaterial(),createFireEmbers(),fireEmberMaterial(),fireEmberPose),
+  ];
   const geometry = roundedSquare(config.tiles.mobileSize);
   const gasAuraGeometry=new THREE.PlaneGeometry(config.tiles.mobileSize+24,config.tiles.mobileSize+24);
   const shadowGeometry = new THREE.PlaneGeometry(80, 80);
@@ -163,11 +168,12 @@ export async function createScene(host, config, reducedMotion) {
     const style=getComputedStyle(host);
     layout=viewportLayout(host.clientWidth,host.clientHeight,parseFloat(style.getPropertyValue('--safe-top'))||0,parseFloat(style.getPropertyValue('--safe-bottom'))||0);
     renderer.setSize(host.clientWidth,host.clientHeight,false);
-    renderer.getDrawingBufferSize(drawingSize);snowMaterial.uniforms.pointScale.value=drawingSize.y/layout.height;
-    if(iceTarget){renderer.getDrawingBufferSize(drawingSize);iceTarget.setSize(drawingSize.x,drawingSize.y);}
+    renderer.getDrawingBufferSize(drawingSize);
+    for(const layer of climateLayers)layer.particleMaterial.uniforms.pointScale.value=drawingSize.y/layout.height;
+    if(effectTarget)effectTarget.setSize(drawingSize.x,drawingSize.y);
     camera.left=-layout.width/2;camera.right=layout.width/2;camera.top=layout.height/2;camera.bottom=-layout.height/2;camera.updateProjectionMatrix();
     sky.scale.set(layout.width/360,layout.height/640,1);
-    frostTint.scale.set(layout.width/360,layout.height/640,1);
+    for(const layer of climateLayers)layer.tint.scale.set(layout.width/360,layout.height/640,1);
     edgeVeil.scale.copy(sky.scale);edgeMaterial.uniforms.fieldHeight.value=layout.height;
     const bands=fieldVeilBands(layout);edgeMaterial.uniforms.veilBands.value.set(bands.topSolid,bands.topClear,bands.bottomClear,bands.bottomSolid);
     ui.resize(layout);
@@ -250,33 +256,37 @@ export async function createScene(host, config, reducedMotion) {
       const t=tap.age/.24;tap.mesh.scale.setScalar(reducedMotion?1:1+t*1.8);tap.mesh.material.opacity=(1-t)*.38;
     }
     skyMaterial.uniforms.time.value = edgeMaterial.uniforms.time.value = reducedMotion ? 0 : game.elapsed;
-    stepIceWave(iceWave,{active:game.effects.hourglass>0,paused:game.phase==='paused',reducedMotion,interrupted:Boolean(game.activeEffect&&game.activeEffect!=='hourglass'),delta:dt});
-    tintMaterial.uniforms.opacity.value=iceWave.opacity;
-    tintMaterial.uniforms.progress.value=iceWave.progress;
-    stepIceSnow(snowState,{visible:iceWave.opacity>0,paused:game.phase==='paused',reducedMotion,delta:dt});
-    if(iceWave.opacity>0){
-      for(let i=0;i<snowFlakes.length;i++){
-        const pose=iceSnowPose(snowFlakes[i],{width:layout.width,height:layout.height,time:snowState.time,progress:iceWave.progress,opacity:iceWave.opacity});
-        snowPositions[i*3]=pose.x-layout.width/2;snowPositions[i*3+1]=pose.y-layout.height/2;
-        snowAlphas[i]=pose.alpha;
+    for(const layer of climateLayers){
+      const wave=layer.wave;
+      stepThermalWave(wave,{active:game.effects[layer.effect]>0,paused:game.phase==='paused',reducedMotion,interrupted:Boolean(game.activeEffect&&game.activeEffect!==layer.effect),delta:dt});
+      layer.material.uniforms.opacity.value=wave.opacity;layer.material.uniforms.progress.value=wave.progress;
+      layer.tint.visible=layer.points.visible=wave.opacity>0;
+      stepThermalParticles(layer.clock,{visible:wave.opacity>0,paused:game.phase==='paused',reducedMotion,delta:dt});
+      if(wave.opacity<=0)continue;
+      for(let i=0;i<layer.particles.length;i++){
+        const pose=layer.pose(layer.particles[i],{width:layout.width,height:layout.height,time:layer.clock.time,progress:wave.progress,opacity:wave.opacity});
+        layer.positions[i*3]=pose.x-layout.width/2;layer.positions[i*3+1]=pose.y-layout.height/2;
+        layer.alphas[i]=pose.alpha;
       }
-      snowGeometry.attributes.position.needsUpdate=true;snowGeometry.attributes.alpha.needsUpdate=true;
+      layer.geometry.attributes.position.needsUpdate=true;layer.geometry.attributes.alpha.needsUpdate=true;
     }
-    // Allocate the extra color pass only during ice and its short release.
+    // Share a single color pass between ice and fire, only while one is visible.
     // UI never enters this target, so it retains its normal colors and contrast.
-    if(iceWave.opacity>0&&!iceTarget){
+    const climateVisible=climateLayers.some(layer=>layer.wave.opacity>0);
+    if(climateVisible&&!effectTarget){
       renderer.getDrawingBufferSize(drawingSize);
-      iceTarget=new THREE.WebGLRenderTarget(drawingSize.x,drawingSize.y,{samples:4});
-      tintMaterial.uniforms.source.value=iceTarget.texture;
-    }else if(iceWave.opacity===0&&iceTarget){
-      iceTarget.dispose();iceTarget=null;tintMaterial.uniforms.source.value=null;
+      effectTarget=new THREE.WebGLRenderTarget(drawingSize.x,drawingSize.y,{samples:4});
+      for(const layer of climateLayers)layer.material.uniforms.source.value=effectTarget.texture;
+    }else if(!climateVisible&&effectTarget){
+      effectTarget.dispose();effectTarget=null;
+      for(const layer of climateLayers)layer.material.uniforms.source.value=null;
     }
-    renderer.setRenderTarget(iceTarget);
+    renderer.setRenderTarget(effectTarget);
     renderer.setScissorTest(false); renderer.clear(); renderer.render(background, camera);
     renderer.clearDepth();
     renderer.render(scene,camera);
     if(game.phase!=='ready')renderer.render(edgeScene,camera);
-    if(iceTarget){renderer.setRenderTarget(null);renderer.clear();renderer.render(atmosphere,camera);}
+    if(effectTarget){renderer.setRenderTarget(null);renderer.clear();renderer.render(atmosphere,camera);}
     ui.sync(game, view); ui.animate(now,dt,game);
     renderer.clearDepth(); renderer.render(ui.scene, camera);
   }
@@ -349,7 +359,7 @@ export async function createScene(host, config, reducedMotion) {
         scene.add(cloud);clouds.push(cloud);
       }
     },
-    // Retain the current ice mix: when the engine clears its effect, the next
+    // Retain the current climate mix: when the engine clears its effect, the next
     // frames dissolve it gently even if the round ended or was restarted.
     reset() { for(const tap of taps){tap.mesh.removeFromParent();tap.mesh.material.dispose();}taps.length=0;ui.reset();clearTransfers();for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
   };

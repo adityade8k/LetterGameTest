@@ -54,8 +54,8 @@
     get secondsUntilWordTimeout() {
       if (!this.current) return Infinity;
       // Convert the remaining clock units into real active time, including the
-      // switch back to normal speed when the current ice or fire expires.
-      const effectSeconds = Math.max(this.effects.hourglass, this.effects.fire);
+      // switch back to normal speed when ice expires. Fire only speeds tiles.
+      const effectSeconds = this.effects.hourglass;
       const effectDrain = effectSeconds * this.timeScale;
       return this.letterSeconds <= effectDrain
         ? this.letterSeconds / this.timeScale
@@ -109,6 +109,12 @@
       return base * rewards.longWordMultiplier;
     }
     timeForPoints(points, length) {
+      const { sixLetterTargetSeconds, sixLetterBonusSeconds } = this.config.rewards;
+      const sixLetterTarget = Math.min(sixLetterTargetSeconds, this.config.timer.maxSeconds);
+      if (length >= 8) return Math.max(0, this.maxTimeSeconds - this.remaining);
+      if (length === 7) return Math.max(0, this.config.timer.maxSeconds - this.remaining);
+      if (length === 6) return this.remaining <= sixLetterTarget
+        ? Math.max(0, sixLetterTarget - this.remaining) : sixLetterBonusSeconds;
       const time = this.uncappedTimeForPoints(points, length);
       if (length <= 3) return Math.min(this.config.rewards.threeLetterMaxSeconds, time);
       if (length === 4) return Math.min(this.config.rewards.fourLetterMaxSeconds, time);
@@ -116,13 +122,15 @@
     }
     rewardFor(word) { return this.timeForPoints(this.pointsFor(word), word.length); }
     get pendingReward() {
-      // Gold doubles the word score once. Time continues to use the unchanged
-      // letter values and short-word caps, even with several gold letters.
+      // Gold only doubles the score. Time uses ordinary letter values through
+      // five letters, then the same length-based refill for every word.
       return this.isRepeat ? 0 : this.timeForPoints(this.pendingBasePoints, this.current.length);
     }
     get hasBonus() { return this.currentTiles.some(tile => tile.bonus); }
     get activeEffect() { return ['hourglass', 'smoke', 'fire'].find(effect => this.effects[effect] > 0) || null; }
-    get timeScale() { return this.effects.fire > 0 ? this.config.fire.timeScale : this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
+    get timeScale() { return this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
+    get worldTimeScale() { return this.effects.fire > 0 ? this.config.fire.worldTimeScale : this.timeScale; }
+    get maxTimeSeconds() { return this.config.timer.maxSeconds * this.config.timer.overtimeMultiplier; }
     get isWord() { return this.currentPrefixes.some(word=>this.dictionary.has(word)); }
     get isRepeat() { return this.isWord && this.currentPrefixes.filter(word=>this.dictionary.has(word)).every(word=>this.used.has(word)); }
     resolvedWord() {
@@ -159,9 +167,9 @@
       return timeout;
     }
     elapse(seconds) {
-      // Integrate across the exact moment ice or fire expires. Only one can
-      // be active, and its duration always uses real active seconds.
-      const effectSeconds = Math.min(seconds, Math.max(this.effects.hourglass, this.effects.fire));
+      // Only ice changes countdown speed. All effect durations, including
+      // fire's faster tile motion, continue to use real active seconds.
+      const effectSeconds = Math.min(seconds, this.effects.hourglass);
       const effectDrain = effectSeconds * this.timeScale;
       const drain = effectDrain + seconds - effectSeconds;
       const activeSeconds = this.remaining <= effectDrain
@@ -264,7 +272,11 @@
       this.recordComboWord();
       this.clearCurrentWord();
       const before = this.remaining;
-      this.remaining = Math.min(this.config.timer.maxSeconds, this.remaining + requestedReward);
+      // Six-letter bonuses and eight-letter refills may enter overtime. Short
+      // words may replenish overtime already earned, but cannot create it.
+      const cap = word.length === 6 || word.length >= 8 || before > this.config.timer.maxSeconds
+        ? this.maxTimeSeconds : this.config.timer.maxSeconds;
+      this.remaining += Math.max(0, Math.min(requestedReward, cap - before));
       const hourglassOffered = false; // Kept in accepted events for older renderers.
       return { type: 'word', automatic, comboCount: this.comboCount, letterWindow: this.nextLetterWindow, word, pattern, selectedTiles, blankCount, activeSeconds, wordIndex: this.words.length, points, basePoints, scoreMultiplier, bonusPoints, requestedReward, bonusReward, reward: this.remaining - before, hourglassOffered };
     }

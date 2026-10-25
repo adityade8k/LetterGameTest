@@ -12,6 +12,7 @@
   "timer": {
     "startSeconds": 60,
     "maxSeconds": 60,
+    "overtimeMultiplier": 1.5,
     "lowTimeSeconds": 15
   },
   "rules": {
@@ -42,7 +43,9 @@
     "threeLetterMaxSeconds": 0.5,
     "fourLetterMultiplier": 0.25,
     "fourLetterMaxSeconds": 2,
-    "longWordMultiplier": 1.2
+    "longWordMultiplier": 1.2,
+    "sixLetterTargetSeconds": 45,
+    "sixLetterBonusSeconds": 10
   },
   "bonusLetters": {
     "chance": 0.16,
@@ -76,8 +79,8 @@
     "redChance": 0.03
   },
   "fire": {
-    "durationSeconds": 5,
-    "timeScale": 2
+    "durationSeconds": 7.5,
+    "worldTimeScale": 2.5
   },
   "smoke": {
     "durationSeconds": 5,
@@ -244,6 +247,7 @@
       }
     };
     for (const key of ['startSeconds', 'maxSeconds']) number('timer', key, 0, true);
+    number('timer', 'overtimeMultiplier', 1);
     number('timer', 'lowTimeSeconds');
     number('wildcards', 'chance');
     if (config.wildcards.chance > 1) throw new Error('config.js: wildcards.chance must be at most 1.');
@@ -277,7 +281,7 @@
     number('hourglass', 'durationSeconds', 0, true);
     number('hourglass', 'timeScale', 0, true);
     number('fire', 'durationSeconds', 0, true);
-    number('fire', 'timeScale', 1, true);
+    number('fire', 'worldTimeScale', 1, true);
     number('smoke', 'durationSeconds', 0, true);
     number('hourglass', 'rotationDegreesPerSecond', 0, true);
     number('smoke', 'radiusFraction', 0, true);

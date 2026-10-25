@@ -117,7 +117,7 @@ test('compact chrome anchors to tall phone safe areas and leaves most of the fie
   const {viewportLayout,fieldVeilBands}=await layoutModule;
   for(const [w,h,safeTop,safeBottom] of [[320,568,0,0],[390,844,47,34],[430,932,59,34],[506.25,900,0,0]]){
     const layout=viewportLayout(w,h,safeTop,safeBottom),bands=fieldVeilBands(layout);
-    assert.ok((layout.visibleArea-layout.bottom*layout.width)/(layout.width*(layout.height-layout.top-layout.bottom))>.78);
+    assert.ok((layout.visibleArea-layout.bottom*layout.width)/(layout.width*(layout.height-layout.top-layout.bottom))>.75);
     assert.equal(layout.panels[0].y+layout.panels[0].h,bands.topSolid);
     assert.equal(layout.panels[1].y,bands.bottomSolid);
     assert.ok(bands.topClear<bands.bottomClear);

@@ -23,6 +23,8 @@ export const DESIGN = {
     fire: ['#ffe329', '#f5861f'],
     fireDeep: '#c8422b',
     fireInk: ['#4b211c', '#3a1c16'],
+    fireTint: '#dc4c30',
+    fireGlow: '#ff9970',
     goldSurface: ['#e6ab43', '#ac7127'],
     goldHighlight: ['#fff4bb', '#ffe291'],
     goldInk: ['#563618', '#42280f'],
