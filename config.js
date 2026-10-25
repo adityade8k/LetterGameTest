@@ -17,9 +17,9 @@
   },
   "rules": {
     "minWordLength": 3,
-    "nextLetterSeconds": 2,
+    "nextLetterSeconds": 5,
     "extensionAfterLength": 4,
-    "extensionSecondsPerLetter": 0.5
+    "extensionSecondsPerLetter": 1
   },
   "combo": {
     "enabled": true,
