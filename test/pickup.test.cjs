@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const {WordGame}=require('../engine.js');
 const {createConfig}=require('../config.js');
 const words=['CAT','CATS','DOG','SUN','SMILE','STARE','RAT','RATS','HAT','HATS','MAT','MATS','HEN','HENS','TEN','TENS','NET','NETS','PET','PETS','PEN','PENS','COT'];
-const make=()=>{const game=new WordGame(words);game.start(0);return game;};
+const make=options=>{const game=new WordGame(words,options);game.start(0);return game;};
 const scoreTo=(game,count)=>{while(game.wordCount<count){for(const letter of words[game.wordCount])game.select(letter,0);assert.equal(game.submit(0).type,'word');}};
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} versus ${b}`);
 
@@ -91,7 +91,7 @@ test('gold collection feedback fires for a consumed tile and does not leak throu
  const paused=make();paused.pause(0);assert.equal(paused.select('C',0,{bonus:true}).goldCollected,undefined);
  const invalid=make();assert.equal(invalid.select('!',0,{bonus:true}).goldCollected,undefined);
  for(const pending of ['CAT','CA']){
-   const late=make();for(const letter of pending)late.select(letter,0);
+   const late=make({rules:{nextLetterSeconds:2}});for(const letter of pending)late.select(letter,0);
    const result=late.select('C',4500,{bonus:true});assert.equal(result.consumed,false);assert.equal(result.goldCollected,undefined);assert.equal(late.hasBonus,false);
  }
  const expired=make();assert.equal(expired.select('C',61000,{bonus:true}).goldCollected,undefined);
@@ -99,7 +99,7 @@ test('gold collection feedback fires for a consumed tile and does not leak throu
 });
 
 test('blue letters slow both clocks and suppress smoke letters through pause until expiry',()=>{
- const game=make();game.select('C',0,{effect:'hourglass'});game.advance(1000);
+ const game=make({rules:{nextLetterSeconds:2}});game.select('C',0,{effect:'hourglass'});game.advance(1000);
  near(game.remaining,59.6);near(game.letterSeconds,1.6);
  assert.equal(game.select('A',1000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,6.5);
  assert.equal(game.select('T',2000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,5.5);
@@ -122,7 +122,7 @@ test('paused, invalid input and late selection do not consume or activate a colo
    assert.deepEqual(paused.effects,{hourglass:0,smoke:0,fire:0});
    const invalid=make();assert.equal(invalid.select('!',0,{effect}).type,'ignored');assert.equal(invalid.effects[effect],0);
    for(const word of ['CAT','CA']){
-     const game=make();for(const letter of word)game.select(letter,0);
+     const game=make({rules:{nextLetterSeconds:2}});for(const letter of word)game.select(letter,0);
      const result=game.select('S',4500,{effect});assert.equal(result.consumed,false);assert.equal(result.tileEffect,undefined);assert.equal(game.effects[effect],0);
    }
    const ended=make(),result=ended.select('C',61000,{effect});assert.equal(result.consumed,false);assert.equal(result.tileEffect,undefined);assert.equal(ended.effects[effect],0);

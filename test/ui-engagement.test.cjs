@@ -25,7 +25,7 @@ async function create(overrides={},uiOverrides={}){
   const raycaster=new THREE.Raycaster();
   const hit=(x,y)=>{ui.scene.updateMatrixWorld(true);raycaster.setFromCamera(new THREE.Vector2(x/180-1,1-y/320),camera);return ui.hit(raycaster);};
   const sync=()=>ui.sync(game,view);sync();
-  return {ui,game,view,hit,sync,THREE,camera};
+  return {ui,game,view,hit,sync,THREE,camera,font};
 }
 
 test('home meshes open distinct screens and modal screens expose no underlying controls',supported,async()=>{
@@ -202,7 +202,7 @@ test('scored gold feedback is animated, pause-safe, reduced-motion-safe and clea
 });
 
 test('double score appears only for credited gold words, including automatic submission',supported,async()=>{
-  const {ui,game,view,sync}=await create();
+  const {ui,game,view,sync}=await create({rules:{nextLetterSeconds:2,extensionSecondsPerLetter:.5}});
   const hasRibbon=()=>{let found=false;ui.scene.traverse(o=>{if(o.userData.goldCelebration)found=true;});return found;};
   const observe=result=>{ui.celebrate(result,game);sync();return result;};
   const start=()=>{game.start(0);ui.reset();sync();};
@@ -247,7 +247,7 @@ test('the home and gameplay retain only the requested hierarchy',supported,async
 });
 
 test('home branding respects reduced motion and the letter meter explains its growing duration',supported,async()=>{
-  const {ui,game,view,sync}=await create();
+  const {ui,game,view,sync}=await create({rules:{nextLetterSeconds:2,extensionSecondsPerLetter:.5}});
   let tile;ui.scene.traverse(o=>{if(o.userData.brandTile)tile=o;});assert.ok(tile);
   const y=tile.position.y,rotation=tile.rotation.z;ui.animate(1000,1,game);assert.equal(tile.position.y,y);assert.equal(tile.rotation.z,rotation);
   ui.setReducedMotion(false);ui.animate(2000,1,game);assert.notEqual(tile.position.y,y);
@@ -309,4 +309,34 @@ test('normal and overtime meter capacities follow configuration rather than the 
   let timer,overtime;ui.scene.traverse(o=>{if(o.userData.roundTimeBar)timer=o;if(o.userData.overtimeBar)overtime=o;});
   assert.equal(timer.scale.x,.5);game.remaining=100;sync();assert.equal(timer.scale.x,1);assert.equal(overtime.scale.x,.5);
   assert.match(visibleText(ui).join(' '),/OVERTIME 125%/);
+});
+
+
+test('text batches matching inks without changing glyph bounds, bevels or special-letter colors',supported,async()=>{
+  const {ui,game,sync,THREE,font}=await create();game.start(0);
+  game.select('A',0,{bonus:true});game.select('P',0,{effect:'smoke'});game.select('P',0,{effect:'hourglass'});game.select('L',0,{effect:'smoke'});game.select('E',0,{effect:'fire'});sync();
+  let word;ui.scene.traverse(o=>{if(o.userData.uiText==='APPLE')word=o;});assert.ok(word);
+  assert.equal(word.children.length,4,'matching magenta letters share one mesh while gold, ice and fire keep their ink');
+  const {TextGeometry}=await import('../vendor/three/addons/geometries/TextGeometry.js');
+  const expected=new THREE.Box3();let cursor=0,vertices=0;
+  for(const char of 'APPLE'){
+    const glyph=new TextGeometry(char,{font,size:24,depth:.7,curveSegments:3,bevelEnabled:true,bevelThickness:.12,bevelSize:.1,bevelSegments:1});
+    glyph.computeBoundingBox();expected.union(glyph.boundingBox.clone().translate(new THREE.Vector3(cursor,0,0)));vertices+=glyph.attributes.position.count;
+    cursor+=font.data.glyphs[char].ha/font.data.resolution*24;glyph.dispose();
+  }
+  const actual=new THREE.Box3();let mergedVertices=0;
+  for(const mesh of word.children){mesh.geometry.computeBoundingBox();actual.union(mesh.geometry.boundingBox);mergedVertices+=mesh.geometry.attributes.position.count;}
+  assert.equal(mergedVertices,vertices,'batching keeps the complete raised glyph surfaces');
+  for(const axis of ['x','y','z']){assert.ok(Math.abs(actual.min[axis]-expected.min[axis])<.0001);assert.ok(Math.abs(actual.max[axis]-expected.max[axis])<.0001);}
+  const disposed=[];for(const mesh of word.children)mesh.geometry.addEventListener('dispose',()=>disposed.push(mesh.geometry));
+  game.undo(0);sync();assert.equal(disposed.length,4,'replaced word buffers are released');
+  let placeholder;ui.scene.traverse(o=>{if(o.userData.uiText==='Catch letters...')placeholder=o;});assert.equal(placeholder.children.length,1,'uniform text takes a single draw');
+});
+
+test('deferred frame sync updates the clock once in animate while direct sync remains immediate',supported,async()=>{
+  const {ui,game,view,sync}=await create();game.start(0);sync();
+  let timer;ui.scene.traverse(o=>{if(o.userData.roundTimeBar)timer=o;});const full=timer.scale.x;
+  game.remaining=30;ui.sync(game,view,true);assert.equal(timer.scale.x,full);
+  ui.animate(100,.016,game);assert.equal(timer.scale.x,.5);
+  game.remaining=15;sync();assert.equal(timer.scale.x,.25);
 });

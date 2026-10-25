@@ -49,7 +49,7 @@ test('blanks cannot gain points or carry gold; a real gold letter doubles only a
 });
 
 test('automatic long-word scoring doubles actual points while retaining base-letter time rewards',()=>{
-  const game=create(['CATCH']);
+  const game=create(['CATCH'],{rules:{nextLetterSeconds:2,extensionSecondsPerLetter:.5}});
   game.select('C',0,{bonus:true});game.select('?',0,{bonus:true});
   for(const letter of 'TCH')game.select(letter,0);
   assert.equal(game.advance(2499),null);

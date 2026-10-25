@@ -62,7 +62,7 @@ test('a neutral repeat never enters Wordbook history or changes unique-word prog
 
 test('automatic repeat deadline wins over late input and cannot consume a special tile',()=>{
  for(const action of ['select','submit','undo','collectHourglass','pause']){
-  const g=new WordGame(['CAT']);g.start(0);spell(g,'CAT');g.submit(0);spell(g,'CAT');g.hourglassOffer=true;
+  const g=new WordGame(['CAT'],{rules:{nextLetterSeconds:2}});g.start(0);spell(g,'CAT');g.submit(0);spell(g,'CAT');g.hourglassOffer=true;
   const result=action==='select'?g.select('C',2000,{effect:'smoke'}):g[action](2000);
   assert.equal(result.type,'repeat');assert.equal(result.automatic,true);assert.equal(result.points,0);
   assert.equal(result.activeSeconds,2);assert.equal(g.score,5);assert.equal(g.wordCount,1);assert.equal(g.remaining,58);
@@ -73,7 +73,7 @@ test('automatic repeat deadline wins over late input and cannot consume a specia
 });
 
 test('a delayed automatic repeat preserves its event without extending the round',()=>{
- const g=new WordGame(['CAT']);g.start(0);spell(g,'CAT');g.submit(0);spell(g,'CAT');
+ const g=new WordGame(['CAT'],{rules:{nextLetterSeconds:2}});g.start(0);spell(g,'CAT');g.submit(0);spell(g,'CAT');
  const result=g.advance(70000);
  assert.equal(result.type,'repeat');assert.equal(result.ended,true);assert.equal(result.automatic,true);assert.equal(result.activeSeconds,2);
  assert.equal(result.reward,0);assert.equal(result.hourglassOffered,false);assert.equal(g.elapsed,60);assert.equal(g.remaining,0);

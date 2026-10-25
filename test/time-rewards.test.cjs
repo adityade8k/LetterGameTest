@@ -81,7 +81,7 @@ test('automatic submissions use the clock at their exact deadline, then spend de
     ['FLOWERS',40,3.5,23.5,59],
     ['ELEPHANT',20,4,74,89],
   ]){
-    const game=make();game.remaining=start;if(fire)game.activate('fire',0);spell(game,word);
+    const game=make({rules:{nextLetterSeconds:2,extensionSecondsPerLetter:.5}});game.remaining=start;if(fire)game.activate('fire',0);spell(game,word);
     const result=game.advance((deadline+1)*1000);
     assert.equal(result.type,'word');assert.equal(result.automatic,true);near(result.activeSeconds,deadline);
     near(result.reward,reward);near(game.remaining,after);assert.equal(game.timeScale,1);

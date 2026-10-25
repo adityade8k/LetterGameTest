@@ -16,7 +16,7 @@ test('fire speeds only the world by 2.5 for 7.5 real active seconds, then return
 });
 
 test('fire leaves the real letter deadline, displayed budget and discard penalty unchanged',()=>{
-  const game=make(),result=game.select('C',0,{effect:'fire',bonus:true});
+  const game=make({rules:{nextLetterSeconds:2}}),result=game.select('C',0,{effect:'fire',bonus:true});
   assert.deepEqual(result.tileEffect,{effect:'fire',duration:7.5});
   assert.equal(game.currentTiles[0].bonus,false);assert.equal(game.currentTiles[0].effect,'fire');
   near(game.letterWindow,2);near(game.secondsUntilWordTimeout,2);
@@ -27,7 +27,7 @@ test('fire leaves the real letter deadline, displayed budget and discard penalty
 });
 
 test('a delayed fire frame submits a valid word at its exact deadline and drains the rest of the frame',()=>{
-  const game=make();game.select('C',0,{effect:'fire'});spell(game,'AT');
+  const game=make({rules:{nextLetterSeconds:2}});game.select('C',0,{effect:'fire'});spell(game,'AT');
   const result=game.advance(3000);
   assert.equal(result.type,'word');assert.equal(result.automatic,true);assert.equal(result.word,'CAT');
   assert.equal(result.points,5);near(result.reward,.5);near(result.activeSeconds,2);
@@ -36,7 +36,7 @@ test('a delayed fire frame submits a valid word at its exact deadline and drains
 });
 
 test('an automatic word survives a late fire frame that subsequently ends the round',()=>{
-  const game=make({timer:{startSeconds:3}});game.activate('fire',0);spell(game,'CAT');
+  const game=make({timer:{startSeconds:3},rules:{nextLetterSeconds:2}});game.activate('fire',0);spell(game,'CAT');
   const result=game.advance(10000);
   assert.equal(result.type,'word');assert.equal(result.ended,true);assert.equal(result.points,5);
   near(result.activeSeconds,2);near(game.elapsed,3.5);assert.equal(game.phase,'over');
@@ -94,7 +94,7 @@ test('pausing freezes fire, extra activations cannot refresh it, and restart cle
 test('late or blank fire selections cannot replace ice, and consumed misspellings respect game over',()=>{
   const blank=make();blank.activate('hourglass',0);blank.select('?',0,{effect:'fire'});
   assert.equal(blank.effects.fire,0);assert.equal(blank.effects.hourglass,7.5);assert.equal(blank.currentTiles[0].effect,null);
-  const late=make();late.activate('hourglass',0);spell(late,'CAT');
+  const late=make({rules:{nextLetterSeconds:2}});late.activate('hourglass',0);spell(late,'CAT');
   const result=late.select('C',5000,{effect:'fire'});
   assert.equal(result.type,'word');assert.equal(result.consumed,false);assert.equal(result.tileEffect,undefined);
   assert.equal(late.effects.fire,0);near(late.effects.hourglass,2.5);

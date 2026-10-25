@@ -3,7 +3,8 @@ const assert=require('node:assert/strict');
 const {WordGame}=require('../engine.js');
 const {createConfig}=require('../config.js');
 const words=['CAT','CATCH','CATS','DOG','DOGS','RAT','RATS','SUN','SUNS','HAT','HATS','MAT','MATS','HEN','HENS','TEN','TENS','NET','NETS','PET','PETS','PEN','PENS','COT'];
-const create=options=>{const game=new WordGame(words,options,()=>0);game.start(0);return game;};
+// These exact timeline fixtures use a two-second window independently of live tuning.
+const create=(options={})=>{const game=new WordGame(words,{...options,rules:{nextLetterSeconds:2,extensionSecondsPerLetter:.5,...options.rules}},()=>0);game.start(0);return game;};
 const spell=(game,word,now=0,options={})=>{for(const letter of word)game.select(letter,now,options);};
 const complete=(game,word,now=0)=>{spell(game,word,now);return game.submit(now);};
 const boost=game=>{for(const [i,word] of ['CAT','DOG','RAT'].entries())complete(game,word,i*1000);};

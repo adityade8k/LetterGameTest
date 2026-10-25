@@ -43,13 +43,31 @@ export function projectedHalfSize(tile,size,gap=0){
     y:half*(Math.abs(Math.sin(pitch)*Math.sin(yaw))+Math.abs(Math.cos(pitch)))+depth*Math.abs(Math.sin(pitch)*Math.cos(yaw))+gap/2,
   };
 }
-export function contact(a,b,size,gap=0){
-  const ah=projectedHalfSize(a,size,gap),bh=projectedHalfSize(b,size,gap),dx=b.x-a.x,dy=b.y-a.y;
-  if(dx*dx+dy*dy>(Math.hypot(ah.x,ah.y)+Math.hypot(bh.x,bh.y))**2)return null;
-  const ac=Math.cos(a.tilt),as=Math.sin(a.tilt),bc=Math.cos(b.tilt),bs=Math.sin(b.tilt);
-  const axes=[[ac,as],[-as,ac],[bc,bs],[-bs,bc]];
+function collisionBounds(tile,size,gap){
+  const half=projectedHalfSize(tile,size,gap),c=Math.cos(tile.tilt),s=Math.sin(tile.tilt);
+  return {x:half.x,y:half.y,c,s,aligned:tile.tilt===0,
+    extentX:half.x*Math.abs(c)+half.y*Math.abs(s),
+    extentY:half.x*Math.abs(s)+half.y*Math.abs(c),radius:Math.hypot(half.x,half.y)};
+}
+function contactWithBounds(a,b,ah,bh){
+  const dx=b.x-a.x,dy=b.y-a.y;
+  // Production tiles turn around Y only, so their projected screen bounds are
+  // axis aligned. Keep the same X-first tie break and signed normal as SAT.
+  if(ah.aligned&&bh.aligned){
+    const overlapX=ah.x+bh.x-Math.abs(dx),overlapY=ah.y+bh.y-Math.abs(dy);
+    if(overlapX<=0||overlapY<=0)return null;
+    if(overlapX<=overlapY){const sign=dx<0?-1:1;return {penetration:overlapX,nx:sign,ny:ah.s*sign};}
+    const sign=dy<0?-1:1;return {penetration:overlapY,nx:-ah.s*sign,ny:sign};
+  }
+  // Conservative screen-axis rejection avoids generic SAT work on distant
+  // tilted pairs. The tiny margin preserves floating-point contact boundaries.
+  if(Math.abs(dx)>ah.extentX+bh.extentX+1e-9||Math.abs(dy)>ah.extentY+bh.extentY+1e-9)return null;
+  if(dx*dx+dy*dy>(ah.radius+bh.radius)**2)return null;
+  const ac=ah.c,as=ah.s,bc=bh.c,bs=bh.s;
   let penetration=Infinity,nx=0,ny=0;
-  for(const [x,y] of axes){
+  for(let axis=0;axis<4;axis++){
+    const x=axis===0?ac:axis===1?-as:axis===2?bc:-bs;
+    const y=axis===0?as:axis===1?ac:axis===2?bs:bc;
     const distance=dx*x+dy*y;
     const ar=ah.x*Math.abs(ac*x+as*y)+ah.y*Math.abs(-as*x+ac*y);
     const br=bh.x*Math.abs(bc*x+bs*y)+bh.y*Math.abs(-bs*x+bc*y);
@@ -59,17 +77,22 @@ export function contact(a,b,size,gap=0){
   }
   return {penetration,nx,ny};
 }
-function wall(tile,width,size,settings){
-  const half=projectedHalfSize(tile,size,settings.collisionGap);
-  const extent=half.x*Math.abs(Math.cos(tile.tilt))+half.y*Math.abs(Math.sin(tile.tilt))+settings.wallPadding;
+export function contact(a,b,size,gap=0){
+  return contactWithBounds(a,b,collisionBounds(a,size,gap),collisionBounds(b,size,gap));
+}
+function wall(tile,width,bounds,settings){
+  const extent=bounds.extentX+settings.wallPadding;
   if(tile.x<extent){tile.x=extent;tile.vx=Math.max(0,-tile.vx*settings.restitution);}
   if(tile.x>width-extent){tile.x=width-extent;tile.vx=Math.min(0,-tile.vx*settings.restitution);}
 }
 export function settleTiles(tiles,width,size,settings){
+  // Separation changes positions and velocities, never orientation. Reuse each
+  // projected shape through all solver iterations instead of rebuilding per pair.
+  const bounds=tiles.map(tile=>collisionBounds(tile,size,settings.collisionGap));
   for(let iteration=0;iteration<settings.solverIterations;iteration++){
     let largest=0;
     for(let i=0;i<tiles.length;i++)for(let j=i+1;j<tiles.length;j++){
-      const a=tiles[i],b=tiles[j],hit=contact(a,b,size,settings.collisionGap);
+      const a=tiles[i],b=tiles[j],hit=contactWithBounds(a,b,bounds[i],bounds[j]);
       if(!hit)continue;
       largest=Math.max(largest,hit.penetration);
       const correction=(hit.penetration+.002)/2;
@@ -77,7 +100,7 @@ export function settleTiles(tiles,width,size,settings){
       const closing=(b.vx-a.vx)*hit.nx+((b.vy||0)-(a.vy||0))*hit.ny;
       if(closing<0){const impulse=-(1+settings.restitution)*closing/2;a.vx-=hit.nx*impulse;a.vy=(a.vy||0)-hit.ny*impulse;b.vx+=hit.nx*impulse;b.vy=(b.vy||0)+hit.ny*impulse;}
     }
-    for(const tile of tiles)wall(tile,width,size,settings);
+    for(let i=0;i<tiles.length;i++)wall(tiles[i],width,bounds[i],settings);
     if(largest<.005)break;
   }
 }
@@ -85,12 +108,13 @@ export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,
   if(dt<=0)return;
   const level=Number.isFinite(difficultyLevel)?Math.max(0,Math.min(1,difficultyLevel)):0;
   const steps=Math.max(1,Math.ceil(dt*120)),step=dt/steps,settings=config.physics;
+  const recovery=1-Math.exp(-settings.fallRecovery*step),damping=Math.exp(-settings.lateralDamping*step);
   for(let n=0;n<steps;n++){
     for(const tile of tiles){
       const target=speed*(tile.kind==='hourglass'?config.hourglass.speedMultiplier:1);
       if(tile.vy===null||tile.vy===undefined)tile.vy=target;
-      tile.vy+=(target-tile.vy)*(1-Math.exp(-settings.fallRecovery*step));
-      tile.vx*=Math.exp(-settings.lateralDamping*step);
+      tile.vy+=(target-tile.vy)*recovery;
+      tile.vx*=damping;
       tile.x+=tile.vx*step;tile.y+=tile.vy*step;
       rotate(tile,step,config,reducedMotion,level);
     }

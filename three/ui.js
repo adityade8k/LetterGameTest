@@ -96,12 +96,38 @@ export function createUI(font, config, reducedMotion=false) {
     const content=String(value), originalWidth=Math.max(0,measure(content,size,spacing));
     const scale=Math.min(1,maxWidth/Math.max(1,originalWidth));
     const g=new THREE.Group();g.userData.uiText=content;g.position.set(x-(align==='center'?originalWidth*scale/2:align==='right'?originalWidth*scale:0),-y-size*scale,z);g.scale.setScalar(scale);parent.add(g);
+    // A line is one draw per ink color, rather than a draw for each letter.
+    // Reuse the cached glyph shapes and copy their vertices at each advance;
+    // layout, bevels and individually colored wildcard letters stay identical.
     let cursor=0;
+    const inks=new Map();
     [...content].forEach((char,i)=>{
-      if(char!==' '){const mesh=new THREE.Mesh(glyph(char,size,raised),materials[colors?.[i]||material]);mesh.position.x=cursor;g.add(mesh);}
+      if(char!==' '){
+        const ink=colors?.[i]||material,shape=glyph(char,size,raised);
+        if(!inks.has(ink))inks.set(ink,[]);
+        inks.get(ink).push({shape,x:cursor});
+      }
       cursor+=(font.data.glyphs[char]?.ha??font.data.glyphs['?'].ha)/font.data.resolution*size+spacing;
     });
+    for(const [ink,parts] of inks){
+      const geometry=new THREE.BufferGeometry();
+      for(const [name,template] of Object.entries(parts[0].shape.attributes)){
+        const length=parts.reduce((sum,part)=>sum+part.shape.attributes[name].array.length,0);
+        const array=new template.array.constructor(length);let offset=0;
+        for(const {shape,x} of parts){
+          const source=shape.attributes[name].array;array.set(source,offset);
+          if(name==='position')for(let i=0;i<source.length;i+=template.itemSize)array[offset+i]+=x;
+          offset+=source.length;
+        }
+        geometry.setAttribute(name,new THREE.BufferAttribute(array,template.itemSize,template.normalized));
+      }
+      geometry.userData.uiTextGeometry=true;
+      g.add(new THREE.Mesh(geometry,materials[ink]));
+    }
     return g;
+  }
+  function disposeText(root){
+    root.traverse(object=>{if(object.geometry?.userData.uiTextGeometry)object.geometry.dispose();});
   }
   function lines(parent,value,x,y,{width=270,size=8,lineHeight=13,align='left',material='muted',z=6}={}) {
     let row=0;
@@ -119,7 +145,7 @@ export function createUI(font, config, reducedMotion=false) {
     const old=slots.get(key);if(old?.signature===signature)return old.group;
     if(old){
       for(let i=controls.length-1;i>=0;i--)if(isWithin(controls[i].root,old.group)){if(controls[i].quiet)controls[i].body.material.dispose();controls.splice(i,1);}
-      old.group.removeFromParent();
+      old.group.removeFromParent();disposeText(old.group);
     }
     const g=new THREE.Group();parent.add(g);build(g);slots.set(key,{signature,group:g});return g;
   }
@@ -244,7 +270,7 @@ export function createUI(font, config, reducedMotion=false) {
     return [...clones.values()];
   }
   function setAlpha(list,alpha){for(const material of list){if(material.uniforms?.opacity)material.uniforms.opacity.value=alpha;else material.opacity=alpha;}}
-  function removeCelebration(item){item.root.removeFromParent();for(const material of item.materials)material.dispose();}
+  function removeCelebration(item){item.root.removeFromParent();disposeText(item.root);for(const material of item.materials)material.dispose();}
   function clearScoreFlights(){
     for(const item of scoreFlights)removeCelebration(item);
     scoreFlights.length=0;scoreLedger.reset();scoreSettleAge=Infinity;scoreAnchor.scale.setScalar(1);
@@ -516,12 +542,12 @@ export function createUI(font, config, reducedMotion=false) {
       return effectsVisible&&localX>137-margin&&localX<223+margin&&localY>86-margin&&localY<108+margin;
     },
     get blocking(){return Boolean(mode);},
-    sync(game,view) {
+    sync(game,view,deferMeters=false) {
       if(game.phase==='over'&&phase!=='over'){clearScoreFlights();clearGoldCelebration();}
       phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.max(0,Math.min(view.collectionPage||0,collectionPages-1));
       intro.visible=homeHud.visible=phase==='ready';playing.visible=phase==='running'||phase==='paused';modal.visible=Boolean(mode);
       hud.visible=phase==='running'||phase==='paused';
-      syncMeters(game);
+      if(!deferMeters)syncMeters(game);
       rewardLayer.visible=phase==='running'&&!mode;
       pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
       slot('storageStatus',intro,view.book?.storageStatus?.state||'',g=>{if(view.book?.storageStatus?.state==='unavailable')text(g,'Discoveries saved for this visit',180,583,{size:6,align:'center',material:'muted',maxWidth:310});});

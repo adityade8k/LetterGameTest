@@ -14,6 +14,43 @@ test('rotated tiles separate at contact and exchange a soft impulse',async()=>{
  assert.ok(a.vx<12);assert.ok(b.vx>-4);
  assert.ok(Math.abs(a.vx)<30&&Math.abs(b.vx)<30);
 });
+
+test('axis-aligned contacts retain X-first ties, contact normals and Y-spin thickness',async()=>{
+ const p=await physics,c=createConfig(),a=tile(p,c,100,100),b=tile(p,c,140,140);
+ a.yaw=b.yaw=0;
+ let hit=p.contact(a,b,47,2);
+ assert.equal(hit.penetration,9);assert.equal(hit.nx,1);assert.equal(hit.ny,0);
+ b.x=60;hit=p.contact(a,b,47,2);assert.equal(hit.nx,-1);assert.equal(Math.abs(hit.ny),0);
+ b.x=100;b.y=60;hit=p.contact(a,b,47,2);assert.equal(Math.abs(hit.nx),0);assert.equal(hit.ny,-1);
+ b.x=149;b.y=100;assert.equal(p.contact(a,b,47,2),null,'touching edges do not penetrate');
+ b.x=140;a.yaw=b.yaw=Math.PI/2;
+ assert.equal(p.contact(a,b,47,2),null,'edge-on tiles use their actual depth');
+});
+
+test('solver bounds are refreshed after Y rotation and retain wall correction',async()=>{
+ const p=await physics,c=createConfig(),a=tile(p,c,110,100),b=tile(p,c,150,100);
+ a.yaw=b.yaw=Math.PI/2;p.settleTiles([a,b],360,47,c.physics);
+ assert.equal(a.x,110);assert.equal(b.x,150);
+ a.yaw=b.yaw=0;p.settleTiles([a,b],360,47,c.physics);
+ assert.equal(p.contact(a,b,47,2),null);assert.ok(a.x<110&&b.x>150);
+ a.x=0;p.settleTiles([a],360,47,c.physics);
+ assert.equal(a.x,47/2+c.physics.collisionGap/2+c.physics.wallPadding);
+});
+
+test('the maximum fire frame preserves the same collision substeps and fall timing',async()=>{
+ const p=await physics,c=createConfig(),random=rng(813);
+ const coarse=Array.from({length:33},(_,i)=>tile(p,c,38+(i%5)*57,Math.floor(i/5)*46,'A',0,random));
+ const fine=structuredClone(coarse),dt=.05*c.fire.worldTimeScale,steps=Math.ceil(dt*120);
+ const options={width:360,size:47,speed:c.falling.pixelsPerSecond,config:c,difficultyLevel:.7};
+ assert.equal(steps,15);
+ for(let frame=0;frame<90;frame++){
+  p.stepTiles(coarse,dt,options);
+  for(let step=0;step<steps;step++)p.stepTiles(fine,dt/steps,options);
+  for(let i=0;i<coarse.length;i++)for(const key of ['x','y','vx','vy','yaw','spinPhase']){
+   assert.ok(Math.abs(coarse[i][key]-fine[i][key])<1e-8,`${key} changed with frame grouping`);
+  }
+ }
+});
 test('long crowded simulations keep rotated squares apart and inside side walls',async()=>{
  const p=await physics,c=createConfig(),random=rng(91);let tiles=[];
  for(let i=0;i<16;i++)tiles.push(tile(p,c,35+(i%5)*70,Math.floor(i/5)*66,'Q',(random()-.5)*1.2,random));

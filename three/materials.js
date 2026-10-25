@@ -134,7 +134,8 @@ export function specialTileMaterial(kind,size=52) {
   });
 }
 
-const ICE_WAVE={start:-.17,end:1.17,feather:.12,ripple:.025,frequency:5.7};
+export const THERMAL_WAVE={start:-.17,end:1.17,feather:.12,ripple:.025,frequency:5.7};
+const ICE_WAVE=THERMAL_WAVE;
 const smooth=(a,b,value)=>{const t=Math.min(1,Math.max(0,(value-a)/(b-a)));return t*t*(3-2*t);};
 
 // The compositor and snow use the same wave shape, in bottom-up field UVs.
@@ -293,6 +294,9 @@ export function atmosphereMaterial({veil=false}={}) {
     fragmentShader: `varying vec2 vUv; uniform vec3 sky,mist,horizon,magenta,ember; uniform float time,grainAmount,fogAmount,veil,fieldHeight; uniform vec4 veilBands;
       void main(){
         vec2 uv=vUv;
+        float y=(1.-uv.y)*fieldHeight;
+        float cover=max(1.-smoothstep(veilBands.x,veilBands.y,y),smoothstep(veilBands.z,veilBands.w,y));
+        if(veil>.5&&cover<=0.)discard;
         float height=uv.y+sin(uv.x*3.1)*.055;
         vec3 col=mix(horizon,ember,smoothstep(.02,.48,height));
         col=mix(col,magenta,smoothstep(.28,.77,height));
@@ -303,8 +307,6 @@ export function atmosphereMaterial({veil=false}={}) {
         col=mix(col,mist,fog*fogAmount);
         float grain=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-.5;
         col+=grain*grainAmount;
-        float y=(1.-uv.y)*fieldHeight;
-        float cover=max(1.-smoothstep(veilBands.x,veilBands.y,y),smoothstep(veilBands.z,veilBands.w,y));
         gl_FragColor=vec4(col,mix(1.,cover,veil));
         #include <colorspace_fragment>
       }`,

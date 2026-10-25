@@ -167,7 +167,7 @@ function pick(tile){
   }
   handle(result);if(result.tileEffect)handle({type:'effect',...result.tileEffect,origin:{x:tile.x,y:tile.y}});refillChoices(true);updateLabel();
 }
-function sync(){
+function sync(updateUI=true){
   audio.setActive(!document.hidden);
   view.best=best;view.roundBest=roundBest;view.soundOn=settings.effects;
   if(game.phase!==lastPhase){
@@ -177,7 +177,7 @@ function sync(){
     }
   }
   audio.setAmbientActive(game.phase==='running'&&!view.mode);
-  scene?.ui.sync(game,view);
+  if(updateUI)scene?.ui.sync(game,view);
 }
 function updateLabel(){
   if(!scene)return;
@@ -337,7 +337,8 @@ try{
       if(arrivals.advance(worldDt,spawnSeconds)&&spawn())arrivals.placed();
     }
     if(now>feedbackUntil){view.feedback='';view.feedbackKind='';}
-    sync();scene.render(tiles,game,dt,now,hover,view);
+    // The renderer synchronizes the mesh UI once, after world updates.
+    sync(false);scene.render(tiles,game,dt,now,hover,view);
     if(now-lastLabel>250){updateLabel();lastLabel=now;}
     requestAnimationFrame(frame);
   }

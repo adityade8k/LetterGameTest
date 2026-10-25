@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
-import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, fireTintMaterial, stepThermalWave, createIceSnow, stepThermalParticles, iceSnowPose, iceSnowMaterial, createFireEmbers, fireEmberPose, fireEmberMaterial } from './materials.js';
+import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, iceTintMaterial, fireTintMaterial, stepThermalWave, createIceSnow, stepThermalParticles, iceSnowPose, iceSnowMaterial, createFireEmbers, fireEmberPose, fireEmberMaterial } from './materials.js';
+import { createThermalUniforms, bindThermalMaterial, updateThermalUniforms } from './thermal-effect.js';
+import { createSmokeAtlas, sampledSmokeMaterial } from './smoke-atlas.js';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout, fieldVeilBands } from './layout.mjs';
@@ -39,11 +41,14 @@ export async function createScene(host, config, reducedMotion) {
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
   camera.position.z = 60;
   let layout;
+  const thermalUniforms=createThermalUniforms();
+  const thermal=material=>bindThermalMaterial(material,thermalUniforms);
+  const clonePlayfield=material=>thermal(material.clone());
   const background = new THREE.Scene(), scene = new THREE.Scene(), atmosphere = new THREE.Scene();
-  const skyMaterial = atmosphereMaterial();
+  const skyMaterial = thermal(atmosphereMaterial());
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(360, 640), skyMaterial);
   sky.position.z = -25; background.add(sky);
-  const edgeScene=new THREE.Scene(),edgeMaterial=atmosphereMaterial({veil:true});
+  const edgeScene=new THREE.Scene(),edgeMaterial=thermal(atmosphereMaterial({veil:true}));
   const edgeVeil=new THREE.Mesh(sky.geometry,edgeMaterial);edgeScene.add(edgeVeil);
   const taps=[],tapGeometry=new THREE.RingGeometry(5.2,6.8,24);
   const tapMaterial=new THREE.MeshBasicMaterial({color:DESIGN.palette.plum[0],transparent:true,opacity:.5,depthWrite:false,depthTest:false});
@@ -54,10 +59,9 @@ export async function createScene(host, config, reducedMotion) {
   materials.smokeTile=gasTileMaterial();
   materials.fire=specialTileMaterial('fire',config.tiles.mobileSize);
   materials.gold=specialTileMaterial('gold',config.tiles.mobileSize);
-  const tintGeometry=new THREE.PlaneGeometry(360,640),drawingSize=new THREE.Vector2();
-  let effectTarget=null;
+  for(const material of Object.values(materials))thermal(material);
+  const drawingSize=new THREE.Vector2();
   function climateLayer(effect,material,particles,particleMaterial,pose){
-    const tint=new THREE.Mesh(tintGeometry,material);tint.visible=false;atmosphere.add(tint);
     const geometry=new THREE.BufferGeometry();
     const positions=new Float32Array(particles.length*3),alphas=new Float32Array(particles.length);
     geometry.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));
@@ -65,7 +69,7 @@ export async function createScene(host, config, reducedMotion) {
     geometry.setAttribute('size',new THREE.Float32BufferAttribute(particles.map(particle=>particle.size),1));
     const points=new THREE.Points(geometry,particleMaterial);
     points.frustumCulled=false;points.renderOrder=1;points.visible=false;atmosphere.add(points);
-    return {effect,material,tint,particles,particleMaterial,pose,geometry,positions,alphas,points,wave:{progress:0,opacity:0},clock:{time:0}};
+    return {effect,material,particles,particleMaterial,pose,geometry,positions,alphas,points,wave:{progress:0,opacity:0},clock:{time:0}};
   }
   const climateLayers=[
     climateLayer('hourglass',iceTintMaterial(),createIceSnow(),iceSnowMaterial(),iceSnowPose),
@@ -77,13 +81,14 @@ export async function createScene(host, config, reducedMotion) {
   const textCache = new Map();
   const bodies = new Map(), transfers = [], clouds = [];
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  const smoke = smokeMaterial();
+  const smokeAtlas=createSmokeAtlas(renderer);
   const cloudGeometry = new THREE.PlaneGeometry(1, 1);
-  const shadow = new THREE.ShaderMaterial({
+  const shadow = thermal(new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
+    uniforms:{shadowTone:{value:new THREE.Color(.40,.25,.30).convertSRGBToLinear()}},
     vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: 'varying vec2 vUv;void main(){float d=length((vUv-.5)*2.);gl_FragColor=vec4(.40,.25,.30,(1.-smoothstep(.12,1.,d))*.21);}',
-  });
+    fragmentShader: 'varying vec2 vUv;uniform vec3 shadowTone;void main(){float d=length((vUv-.5)*2.);gl_FragColor=vec4(shadowTone,(1.-smoothstep(.12,1.,d))*.21);\n#include <colorspace_fragment>\n}',
+  }));
 
   function textMesh(text, size, depth = DESIGN.tile.letterDepth, ink='plum') {
     const key = `${text}:${size}:${depth}`;
@@ -108,7 +113,7 @@ export async function createScene(host, config, reducedMotion) {
     const group = new THREE.Group();
     const surface=tile.effect==='smoke'?'smokeTile':tile.effect==='hourglass'?'ice':tile.effect==='fire'?'fire':tile.bonus?'gold':'cream';
     const ink=tile.effect==='smoke'?'smokeInk':tile.effect==='hourglass'?'iceInk':tile.effect==='fire'?'fireInk':tile.bonus?'goldInk':'letterInk';
-    const pulseMaterial=surface==='smokeTile'?materials.smokeTile.clone():null;
+    const pulseMaterial=surface==='smokeTile'?clonePlayfield(materials.smokeTile):null;
     const body = new THREE.Mesh(geometry, pulseMaterial||materials[surface]);
     group.add(body);
     const front = new THREE.Group();
@@ -129,7 +134,7 @@ export async function createScene(host, config, reducedMotion) {
     scene.add(halo, group);
     let aura=null;
     if(pulseMaterial){
-      aura=new THREE.Mesh(gasAuraGeometry,gasAuraMaterial());aura.renderOrder=-.5;
+      aura=new THREE.Mesh(gasAuraGeometry,thermal(gasAuraMaterial()));aura.renderOrder=-.5;
       // A sibling of the tile, deliberately absent from the raycast group.
       scene.add(aura);
     }
@@ -137,7 +142,7 @@ export async function createScene(host, config, reducedMotion) {
     if(tile.bornAt!==undefined)group.traverse(object=>{
       if(!object.isMesh)return;
       const source=object.material;
-      if(!fades.has(source)){const material=source.clone();material.transparent=true;material.depthWrite=false;fades.set(source,material);}
+      if(!fades.has(source)){const material=clonePlayfield(source);material.transparent=true;material.depthWrite=false;fades.set(source,material);}
       object.material=fades.get(source);
     });
     const model = { group, halo, fades,pulseMaterial,aura,pulsePhase:pulseMaterial?Math.random()*Math.PI*2:0 }; bodies.set(tile, model); return model;
@@ -169,11 +174,10 @@ export async function createScene(host, config, reducedMotion) {
     layout=viewportLayout(host.clientWidth,host.clientHeight,parseFloat(style.getPropertyValue('--safe-top'))||0,parseFloat(style.getPropertyValue('--safe-bottom'))||0);
     renderer.setSize(host.clientWidth,host.clientHeight,false);
     renderer.getDrawingBufferSize(drawingSize);
+    thermalUniforms.thermalResolution.value.copy(drawingSize);
     for(const layer of climateLayers)layer.particleMaterial.uniforms.pointScale.value=drawingSize.y/layout.height;
-    if(effectTarget)effectTarget.setSize(drawingSize.x,drawingSize.y);
     camera.left=-layout.width/2;camera.right=layout.width/2;camera.top=layout.height/2;camera.bottom=-layout.height/2;camera.updateProjectionMatrix();
     sky.scale.set(layout.width/360,layout.height/640,1);
-    for(const layer of climateLayers)layer.tint.scale.set(layout.width/360,layout.height/640,1);
     edgeVeil.scale.copy(sky.scale);edgeMaterial.uniforms.fieldHeight.value=layout.height;
     const bands=fieldVeilBands(layout);edgeMaterial.uniforms.veilBands.value.set(bands.topSolid,bands.topClear,bands.bottomClear,bands.bottomSolid);
     ui.resize(layout);
@@ -259,8 +263,7 @@ export async function createScene(host, config, reducedMotion) {
     for(const layer of climateLayers){
       const wave=layer.wave;
       stepThermalWave(wave,{active:game.effects[layer.effect]>0,paused:game.phase==='paused',reducedMotion,interrupted:Boolean(game.activeEffect&&game.activeEffect!==layer.effect),delta:dt});
-      layer.material.uniforms.opacity.value=wave.opacity;layer.material.uniforms.progress.value=wave.progress;
-      layer.tint.visible=layer.points.visible=wave.opacity>0;
+      layer.points.visible=wave.opacity>0;
       stepThermalParticles(layer.clock,{visible:wave.opacity>0,paused:game.phase==='paused',reducedMotion,delta:dt});
       if(wave.opacity<=0)continue;
       for(let i=0;i<layer.particles.length;i++){
@@ -270,24 +273,17 @@ export async function createScene(host, config, reducedMotion) {
       }
       layer.geometry.attributes.position.needsUpdate=true;layer.geometry.attributes.alpha.needsUpdate=true;
     }
-    // Share a single color pass between ice and fire, only while one is visible.
-    // UI never enters this target, so it retains its normal colors and contrast.
-    const climateVisible=climateLayers.some(layer=>layer.wave.opacity>0);
-    if(climateVisible&&!effectTarget){
-      renderer.getDrawingBufferSize(drawingSize);
-      effectTarget=new THREE.WebGLRenderTarget(drawingSize.x,drawingSize.y,{samples:4});
-      for(const layer of climateLayers)layer.material.uniforms.source.value=effectTarget.texture;
-    }else if(!climateVisible&&effectTarget){
-      effectTarget.dispose();effectTarget=null;
-      for(const layer of climateLayers)layer.material.uniforms.source.value=null;
-    }
-    renderer.setRenderTarget(effectTarget);
+    // The playfield shaders apply the shared wave in place. No multisampled
+    // offscreen color buffer, fullscreen copy, or per-activation allocation.
+    const climate=climateLayers.find(layer=>layer.wave.opacity>0);
+    updateThermalUniforms(thermalUniforms,climate);
+    renderer.setRenderTarget(null);
     renderer.setScissorTest(false); renderer.clear(); renderer.render(background, camera);
     renderer.clearDepth();
     renderer.render(scene,camera);
     if(game.phase!=='ready')renderer.render(edgeScene,camera);
-    if(effectTarget){renderer.setRenderTarget(null);renderer.clear();renderer.render(atmosphere,camera);}
-    ui.sync(game, view); ui.animate(now,dt,game);
+    if(climate)renderer.render(atmosphere,camera);
+    ui.sync(game, view, true); ui.animate(now,dt,game);
     renderer.clearDepth(); renderer.render(ui.scene, camera);
   }
   return {
@@ -332,7 +328,7 @@ export async function createScene(host, config, reducedMotion) {
           if (!object.isMesh) return;
           const source = object.material;
           if (!clonedMaterials.has(source)) {
-            const material = source.clone();
+            const material = clonePlayfield(source);
             material.transparent = true; material.depthWrite = false;
             clonedMaterials.set(source, material);
           }
@@ -351,8 +347,10 @@ export async function createScene(host, config, reducedMotion) {
     releaseSmoke(origin) {
       for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0;
       const patches = LetterfallEffects.smokePatches(layout.width,layout.height,config.smoke,Math.random,origin);
-      for (const patch of patches) {
-        const material=smoke.clone();material.uniforms.seed.value=patch.seed;
+      const firstVariant=Math.floor(Math.random()*smokeAtlas.layout.count);
+      for (let index=0;index<patches.length;index++) {
+        const patch=patches[index];
+        const material=sampledSmokeMaterial(smokeAtlas,(firstVariant+index*5)%smokeAtlas.layout.count);material.uniforms.seed.value=patch.seed;
         const cloud = new THREE.Mesh(cloudGeometry,material);
         cloud.userData.patch=patch;
         cloud.rotation.z=patch.phase;cloud.renderOrder=10;

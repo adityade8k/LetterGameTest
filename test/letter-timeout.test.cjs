@@ -2,14 +2,16 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {WordGame}=require('../engine.js');
 const {createConfig}=require('../config.js');
-const create=options=>{const game=new WordGame(['CAT','CATCH','CATS','DOG'],options);game.start(0);return game;};
+// Pin the algebra fixtures, so editing the game's live timing is not a rules regression.
+const timing={nextLetterSeconds:2,extensionSecondsPerLetter:.5};
+const create=(options={})=>{const game=new WordGame(['CAT','CATCH','CATS','DOG'],{...options,rules:{...timing,...options.rules}});game.start(0);return game;};
 // Keep the established clock-integration fixtures at explicit five-second
-// letter windows and slow-time effects. The default two-second letter window
+// letter windows and slow-time effects. The configured two-second letter window
 // and 7.5-second ice duration have separate coverage below.
 const createFiveSecondFixture=(options={})=>create({...options,rules:{nextLetterSeconds:5,...options.rules},hourglass:{durationSeconds:5,...options.hourglass}});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} versus ${b}`);
 
-test('each accepted letter resets the default two-second deadline, including blanks',()=>{
+test('each accepted letter resets a configured two-second deadline, including blanks',()=>{
   const game=create();game.select('C',1000);game.advance(2999);
   assert.equal(game.current,'C');near(game.letterSeconds,.001);
   game.select('?',2999);near(game.letterSeconds,2);
@@ -135,7 +137,7 @@ test('one long frame and small frames resolve slow word formation at the same ti
 
 
 test('the fifth letter extends the window, and every further letter adds half a second',()=>{
-  const game=new WordGame(['ELEPHANT']);game.start(0);
+  const game=new WordGame(['ELEPHANT'],{rules:timing});game.start(0);
   const durations=[2,2,2,2,2.5,3,3.5,4];
   let now=0;
   for(const [index,letter] of [...'ELEPHANT'].entries()){
@@ -159,7 +161,7 @@ test('a fifth letter at the old deadline cannot rescue an incomplete four-letter
 });
 
 test('a long word keeps its extended window through pause and slow-time expiry',()=>{
-  const game=new WordGame(['ELEPHANT']);game.start(0);
+  const game=new WordGame(['ELEPHANT'],{rules:timing});game.start(0);
   for(const letter of 'ELEPHANT')game.select(letter,0);
   game.activate('hourglass',0);game.pause(2000);
   near(game.letterSeconds,3.2);near(game.effects.hourglass,5.5);
