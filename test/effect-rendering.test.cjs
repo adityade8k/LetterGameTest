@@ -56,24 +56,41 @@ test('smoke atlas variants retain separate padded sampling areas at fixed physic
   for(let first=0;first<16;first++)assert.equal(new Set([0,1,2,3].map(index=>(first+index*5)%16)).size,4);
 });
 
-test('smoke bakes once before interaction and all later cloud materials reuse the same atlas',supported,async()=>{
+for(const useArt of [false,true])test(`smoke ${useArt?'art':'fallback'} bakes once and later clouds reuse its atlas`,supported,async()=>{
   const [THREE,{createSmokeAtlas,sampledSmokeMaterial}]=await Promise.all([import('three'),import('../three/smoke-atlas.js')]);
   const initialTarget={name:'previous'},initialColor=new THREE.Color('#af70a0');
   const state={target:initialTarget,color:initialColor.clone(),alpha:.7,scissor:true};
-  const draws=[],compiled=[];
+  const draws=[],compiled=[];let readbacks=0;
   const renderer={
     getRenderTarget:()=>state.target,getScissorTest:()=>state.scissor,
     getClearColor:out=>out.copy(state.color),getClearAlpha:()=>state.alpha,
     setRenderTarget:target=>{state.target=target;},setScissorTest:value=>{state.scissor=value;},
     setClearColor:(color,alpha)=>{state.color.set(color);state.alpha=alpha;},clear(){},
+    readRenderTargetPixels(target,x,y,width,height,pixels){
+      assert.equal(target,state.target);assert.equal(width,768);assert.equal(height,768);readbacks++;
+      for(let index=3;index<pixels.length;index+=4)pixels[index]=255;
+    },
     compile(scene){assert.equal(state.target,initialTarget,'warm the shader for the original display target');compiled.push(scene.children[0].material);},
     render(scene){
       const material=scene.children[0].material;
       draws.push({target:state.target,viewport:state.target.viewport.clone(),seed:material.uniforms.seed.value,
-        opacity:material.uniforms.opacity.value,dissolve:material.uniforms.dissolve.value,time:material.uniforms.time.value,blending:material.blending});
+        opacity:material.uniforms.opacity.value,dissolve:material.uniforms.dissolve.value,time:material.uniforms.time.value,blending:material.blending,
+        source:material.uniforms.source?.value,rect:material.uniforms.sourceRect?.value.toArray(),flip:material.uniforms.flip?.value.toArray()});
     },
   };
-  const atlas=createSmokeAtlas(renderer);assert.equal(draws.length,16);
+  const source=useArt?new THREE.Texture():null;
+  const atlas=createSmokeAtlas(renderer,source);assert.equal(draws.length,16);
+  if(useArt){
+    for(let index=0;index<16;index++){
+      assert.equal(draws[index].source,source);
+      assert.deepEqual(draws[index].rect,[(index%2)*.5,Math.floor((index%4)/2)*.5,.5,.5]);
+      assert.deepEqual(draws[index].flip,[index&4?-1:1,index&8?-1:1]);
+    }
+    assert.equal(new Set(draws.map(draw=>JSON.stringify([draw.rect,draw.flip]))).size,16);
+    source.dispose(); // The retained atlas must not depend on the source after baking.
+  }
+  assert.equal(readbacks,1);assert.equal(atlas.alphaMasks.length,16);
+  assert.ok(atlas.alphaMasks.every(mask=>mask.size===32&&mask.data.every(alpha=>alpha===255)));
   assert.equal(compiled.length,1,'the lightweight sampler program is also warmed before interaction');
   assert.equal(compiled[0].uniforms.atlas.value,atlas.texture);
   assert.equal(new Set(draws.map(draw=>draw.seed)).size,16);
@@ -90,6 +107,23 @@ test('smoke bakes once before interaction and all later cloud materials reuse th
   clouds[0].uniforms.opacity.value=.2;clouds[0].uniforms.dissolve.value=.6;
   assert.equal(clouds[1].uniforms.opacity.value,1);assert.equal(clouds[1].uniforms.dissolve.value,0);
   assert.equal(draws.length,16,'new bursts perform no shape render or framebuffer allocation');
+  assert.equal(readbacks,1,'coverage guidance is read once during loading, not at pickup');
   assert.equal(atlas.texture.generateMipmaps,false,'atlas filtering cannot bleed neighboring variants');
   for(const cloud of clouds)cloud.dispose();atlas.dispose();
+});
+
+
+test('coverage guides preserve atlas cell boundaries and bottom-up alpha rows',supported,async()=>{
+  const {smokeAtlasLayout,smokeAlphaMasks}=await import('../three/smoke-atlas.js');
+  const layout=smokeAtlasLayout(4,24,2),pixels=new Uint8Array(layout.width*layout.height*4);
+  for(let index=0;index<4;index++){
+    const rect=layout.rect(index);
+    for(let y=0;y<rect.size;y++)for(let x=0;x<rect.size;x++){
+      pixels[((rect.y+y)*layout.width+rect.x+x)*4+3]=20+index*50+y;
+    }
+  }
+  const masks=smokeAlphaMasks(pixels,layout,4);
+  for(let index=0;index<4;index++){
+    assert.deepEqual(Array.from(masks[index].data),[22,22,22,22,27,27,27,27,32,32,32,32,37,37,37,37].map(n=>n+index*50));
+  }
 });

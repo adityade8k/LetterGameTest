@@ -5,6 +5,7 @@ import { DESIGN } from './design.js';
 import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, iceTintMaterial, fireTintMaterial, stepThermalWave, createIceSnow, stepThermalParticles, iceSnowPose, iceSnowMaterial, createFireEmbers, fireEmberPose, fireEmberMaterial } from './materials.js';
 import { createThermalUniforms, bindThermalMaterial, updateThermalUniforms } from './thermal-effect.js';
 import { createSmokeAtlas, sampledSmokeMaterial } from './smoke-atlas.js';
+import { fitSmokeCoverage } from './smoke-coverage.mjs';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout, fieldVeilBands } from './layout.mjs';
@@ -33,9 +34,13 @@ export async function createScene(host, config, reducedMotion) {
   const canvas = renderer.domElement;
   canvas.tabIndex = 0; canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-label', 'Loading falling letters');
   host.append(canvas);
-  const [font,uiFont] = await Promise.all([
+  const [font,uiFont,smokeSource] = await Promise.all([
     new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json'),
     new FontLoader().loadAsync('vendor/fonts/fredoka-semibold.typeface.json'),
+    new THREE.TextureLoader().loadAsync('assets/smoke-haze-atlas.png').then(texture=>{
+      texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=false;texture.minFilter=THREE.LinearFilter;
+      return texture;
+    }).catch(()=>null),
   ]);
   const ui = createUI(uiFont, config, reducedMotion);
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
@@ -81,7 +86,9 @@ export async function createScene(host, config, reducedMotion) {
   const textCache = new Map();
   const bodies = new Map(), transfers = [], clouds = [];
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  const smokeAtlas=createSmokeAtlas(renderer);
+  let smokeAtlas;
+  try{smokeAtlas=createSmokeAtlas(renderer,smokeSource);}
+  finally{smokeSource?.dispose();} // Only the compact baked atlas remains on the GPU.
   const cloudGeometry = new THREE.PlaneGeometry(1, 1);
   const shadow = thermal(new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
@@ -252,7 +259,7 @@ export async function createScene(host, config, reducedMotion) {
       cloud.material.uniforms.time.value=reducedMotion?0:pose.localAge;
       cloud.material.uniforms.dissolve.value=pose.dissolve;
       cloud.position.set(pose.x-layout.width/2,layout.height/2-pose.y,35);
-      cloud.scale.set(pose.diameter*patch.aspect,pose.diameter/patch.aspect,1);
+      cloud.scale.set(pose.width,pose.height,1);
     }
     for(let i=taps.length-1;i>=0;i--){
       const tap=taps[i];tap.age+=dt;
@@ -348,12 +355,15 @@ export async function createScene(host, config, reducedMotion) {
       for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0;
       const patches = LetterfallEffects.smokePatches(layout.width,layout.height,config.smoke,Math.random,origin);
       const firstVariant=Math.floor(Math.random()*smokeAtlas.layout.count);
+      for(let index=0;index<patches.length;index++)patches[index].variant=(firstVariant+index*5)%smokeAtlas.layout.count;
+      const heightScale=fitSmokeCoverage(patches,smokeAtlas.alphaMasks,layout,fieldVeilBands(layout));
+      for(const patch of patches)patch.height*=heightScale;
       for (let index=0;index<patches.length;index++) {
         const patch=patches[index];
-        const material=sampledSmokeMaterial(smokeAtlas,(firstVariant+index*5)%smokeAtlas.layout.count);material.uniforms.seed.value=patch.seed;
+        const material=sampledSmokeMaterial(smokeAtlas,patch.variant);material.uniforms.seed.value=patch.seed;
         const cloud = new THREE.Mesh(cloudGeometry,material);
         cloud.userData.patch=patch;
-        cloud.rotation.z=patch.phase;cloud.renderOrder=10;
+        cloud.renderOrder=10; // Wide banks stay horizontal as they enter from the sides.
         scene.add(cloud);clouds.push(cloud);
       }
     },

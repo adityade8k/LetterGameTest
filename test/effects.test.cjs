@@ -206,22 +206,25 @@ const seededRandom = seed => () => {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
   return seed / 4294967296;
 };
-test('smoke uses varied sizes, silhouettes and spaced in-field anchors', () => {
+test('smoke uses varied horizontal banks and staggered overlapping bands', () => {
   const settings = createConfig().smoke;
   for (const [width,height] of [[360,780],[390,500],[900,640]]) {
-    const short = Math.min(width,height);
     for (let seed=1;seed<=30;seed++) {
       const patches = smokePatches(width,height,settings,seededRandom(seed));
       assert.deepEqual(patches,smokePatches(width,height,settings,seededRandom(seed)));
       assert.equal(patches.length,4);
-      assert.ok(patches.every(p=>p.x>=.14&&p.x<=.86&&p.y>=.20&&p.y<=.74));
-      for(let i=0;i<patches.length;i++)for(let j=i+1;j<patches.length;j++)
-        assert.ok(Math.hypot((patches[i].x-patches[j].x)*width/short,(patches[i].y-patches[j].y)*height/short)>.25);
-      const radii=patches.map(p=>p.radius);
-      assert.ok(radii.every(radius=>radius>=settings.radiusFraction*.64&&radius<settings.radiusFraction*1.34));
-      assert.ok(Math.max(...radii)/Math.min(...radii)>1.4);
-      for(const key of ['seed','phase','aspect']) assert.equal(new Set(patches.map(p=>p[key])).size,4);
-      assert.ok(patches.every(p=>p.aspect>=.73&&p.aspect<1.35));
+      assert.equal(new Set(patches.map(p=>p.side)).size,2);
+      for(const patch of patches){
+        assert.ok(patch.width>=.95&&patch.width<=1.1);
+        assert.ok(patch.height>=.40&&patch.height<=.44);
+        assert.ok(patch.x>.4&&patch.x<.6&&patch.y>.2&&patch.y<.85);
+      }
+      for(let index=1;index<patches.length;index++){
+        const previous=patches[index-1],current=patches[index];
+        assert.ok(current.y>previous.y+.15);
+        assert.ok(current.y-previous.y<(previous.height+current.height)/2,'neighboring banks overlap softly rather than leaving horizontal stripes');
+      }
+      for(const key of ['seed','phase','width','height']) assert.equal(new Set(patches.map(p=>p[key])).size,4);
       assert.notDeepEqual(patches,smokePatches(width,height,settings,seededRandom(seed+1)));
     }
   }
@@ -247,28 +250,21 @@ test('pink smoke fades smoothly, holds an opaque center, and ends on time',()=>{
  assert.throws(()=>createConfig({smoke:{driftPixelsPerSecond:-1}}));
 });
 
-test('smoke forms and dissolves at its anchor with only a few pixels of drift',()=>{
+test('settled smoke keeps its broad shape and dissolves in place even with excessive drift tuning',()=>{
   const s=createConfig().smoke;
   for(const [width,height] of [[360,780],[900,640]]){
-    const patches=smokePatches(width,height,s,seededRandom(36));
-    for(const patch of patches){
-      const start=smokePose(patch,0,5,width,height,s),middle=smokePose(patch,2,3,width,height,s),end=smokePose(patch,5,0,width,height,s);
-      near(start.x,patch.x*width);near(start.y,patch.y*height);assert.equal(start.opacity,0);
-      assert.ok(middle.x>0&&middle.x<width&&middle.y>0&&middle.y<height);assert.equal(middle.opacity,1);
-      assert.equal(end.opacity,0);
-      for(let tick=0;tick<=50;tick++){
+    for(const patch of smokePatches(width,height,s,seededRandom(36))){
+      for(let tick=15;tick<=50;tick++){
         const age=tick/10,remaining=5-age;
         for(const driftPixelsPerSecond of [0,s.driftPixelsPerSecond,1000]){
           const settings={...s,driftPixelsPerSecond};
           const pose=smokePose(patch,age,remaining,width,height,settings);
           assert.ok(Math.hypot(pose.x-patch.x*width,pose.y-patch.y*height)<5);
-          const fullDiameter=Math.min(width,height)*patch.radius*2;
-          assert.ok(pose.diameter>=fullDiameter*.88-1e-8&&pose.diameter<=fullDiameter+1e-8);
-          if(age>=1)near(pose.diameter,fullDiameter);
+          near(pose.width,patch.width*width);near(pose.height,patch.height*height);
           near(pose.opacity,smokeEnvelope(age,remaining,s,patch.delay));
           const reduced=smokePose(patch,age,remaining,width,height,settings,true);
           near(reduced.x,patch.x*width);near(reduced.y,patch.y*height);
-          near(reduced.opacity,pose.opacity);near(reduced.diameter,fullDiameter);
+          near(reduced.opacity,pose.opacity);near(reduced.width,pose.width);near(reduced.height,pose.height);
           if(driftPixelsPerSecond===0){near(pose.x,reduced.x);near(pose.y,reduced.y);}
         }
       }
@@ -276,7 +272,7 @@ test('smoke forms and dissolves at its anchor with only a few pixels of drift',(
   }
 });
 
-test('anchored smoke freezes during pause and dissolves on active time while blocking ice',()=>{
+test('side-entry smoke freezes during pause and dissolves on active time while blocking ice',()=>{
   const game=create(),s=createConfig().smoke;
   const patch=smokePatches(390,500,s,seededRandom(12))[0];
   const pose=()=>smokePose(patch,s.durationSeconds-game.effects.smoke,game.effects.smoke,390,500,s);
