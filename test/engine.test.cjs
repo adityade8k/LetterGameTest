@@ -107,7 +107,7 @@ test('undo clears the whole word for two seconds; restart clears all round state
   assert.equal(game.remaining, 58);
   assert.equal(game.score, 0);
   spell(game, 'CAT'); game.submit(0);
-  spell(game, 'QZ'); assert.equal(game.mistakes, 1);
+  spell(game, 'QZ'); assert.equal(game.mistakes, 2);
   game.start(1000);
   assert.equal(game.phase, 'running');
   assert.equal(game.remaining, 60);

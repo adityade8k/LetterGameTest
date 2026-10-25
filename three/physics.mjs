@@ -23,14 +23,20 @@ export function prepareTile(tile,config,random=Math.random){
 // A uniform phase maps to slow face-on motion and a fast edge crossing.
 // atan2 keeps both faces continuous through complete turns in either direction.
 export function letterYaw(phase,ratio){return Math.atan2(ratio*Math.sin(phase),Math.cos(phase));}
-function rotate(tile,dt,config,reducedMotion,difficultyLevel){
+// Leave the easy half unchanged, then smoothly add extra turning at hard peaks.
+export function difficultyRotationFactor(level,peak=1){
+  const value=Number.isFinite(level)?Math.max(0,Math.min(1,level)):0;
+  const hard=Math.max(0,(value-.5)*2),blend=hard*hard*(3-2*hard);
+  return value*(1+(peak-1)*blend);
+}
+function rotate(tile,dt,config,reducedMotion,phaseFactor){
   if(dt<=0)return;
   if(tile.kind!=='hourglass'&&reducedMotion&&config.rotation.respectReducedMotion)return;
   tile.age+=dt;
   if(tile.kind==='hourglass'){
     tile.yaw=(tile.yaw+tile.rotationSpeed*dt)%(Math.PI*2);
   }else{
-    tile.spinPhase=(tile.spinPhase+tile.rotationSpeed*difficultyLevel*dt)%(Math.PI*2);
+    tile.spinPhase=(tile.spinPhase+tile.rotationSpeed*phaseFactor*dt)%(Math.PI*2);
     tile.yaw=letterYaw(tile.spinPhase,config.rotation.faceTurnRatio);
   }
 }
@@ -106,7 +112,7 @@ export function settleTiles(tiles,width,size,settings){
 }
 export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,random=Math.random,difficultyLevel=0}){
   if(dt<=0)return;
-  const level=Number.isFinite(difficultyLevel)?Math.max(0,Math.min(1,difficultyLevel)):0;
+  const phaseFactor=difficultyRotationFactor(difficultyLevel,config.difficulty?.peakRotationMultiplier??1);
   const steps=Math.max(1,Math.ceil(dt*120)),step=dt/steps,settings=config.physics;
   const recovery=1-Math.exp(-settings.fallRecovery*step),damping=Math.exp(-settings.lateralDamping*step);
   for(let n=0;n<steps;n++){
@@ -116,7 +122,7 @@ export function stepTiles(tiles,dt,{width,size,speed,config,reducedMotion=false,
       tile.vy+=(target-tile.vy)*recovery;
       tile.vx*=damping;
       tile.x+=tile.vx*step;tile.y+=tile.vy*step;
-      rotate(tile,step,config,reducedMotion,level);
+      rotate(tile,step,config,reducedMotion,phaseFactor);
     }
     settleTiles(tiles,width,size,settings);
   }

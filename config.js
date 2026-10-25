@@ -13,7 +13,9 @@
     "startSeconds": 60,
     "maxSeconds": 60,
     "overtimeMultiplier": 1.5,
-    "lowTimeSeconds": 15
+    "lowTimeSeconds": 15,
+    "mistakeGraceCount": 3,
+    "mistakeDrainStep": 0.01
   },
   "rules": {
     "minWordLength": 3,
@@ -69,7 +71,7 @@
     "maxWordsBetweenDrops": 5,
     "speedMultiplier": 1.8,
     "rotationDegreesPerSecond": 56,
-    "durationSeconds": 7.5,
+    "durationSeconds": 6,
     "timeScale": 0.4,
     "color": "#bce2d6"
   },
@@ -79,11 +81,11 @@
     "redChance": 0.03
   },
   "fire": {
-    "durationSeconds": 7.5,
+    "durationSeconds": 6,
     "worldTimeScale": 2.5
   },
   "smoke": {
-    "durationSeconds": 5,
+    "durationSeconds": 4,
     "patchCount": 4,
     "radiusFraction": 0.27,
     "opacity": 1,
@@ -100,7 +102,7 @@
     "invalidWordSeconds": 5
   },
   "falling": {
-    "pixelsPerSecond": 31.32,
+    "pixelsPerSecond": 37.584,
     "letterLimit": 26,
     "visibleLetterTarget": 20,
     "maxVisibleLetters": 48,
@@ -108,8 +110,8 @@
     "minPixelsPerSecond": 29,
     "maxPixelsPerSecond": 55,
     "increasePerWord": 1.1,
-    "desktopSpawnSeconds": 0.54,
-    "mobileSpawnSeconds": 0.72
+    "desktopSpawnSeconds": 0.45,
+    "mobileSpawnSeconds": 0.6
   },
   "density": {
     "startFraction": 0.7,
@@ -176,7 +178,8 @@
     "rampSeconds": 45,
     "minTransitionSeconds": 8,
     "maxTransitionSeconds": 16,
-    "levelSteps": 4
+    "levelSteps": 4,
+    "peakRotationMultiplier": 1.5
   },
   "physics": {
     "collisionGap": 2,
@@ -249,6 +252,8 @@
     for (const key of ['startSeconds', 'maxSeconds']) number('timer', key, 0, true);
     number('timer', 'overtimeMultiplier', 1);
     number('timer', 'lowTimeSeconds');
+    if (!Number.isInteger(config.timer.mistakeGraceCount) || config.timer.mistakeGraceCount < 0) throw new Error('config.js: timer.mistakeGraceCount must be a nonnegative integer.');
+    number('timer', 'mistakeDrainStep');
     number('wildcards', 'chance');
     if (config.wildcards.chance > 1) throw new Error('config.js: wildcards.chance must be at most 1.');
     if (!Number.isInteger(config.wildcards.openingTiles) || config.wildcards.openingTiles < 0 || config.wildcards.openingTiles > 3) throw new Error('config.js: wildcards.openingTiles must be an integer from 0 to 3.');
@@ -329,6 +334,7 @@
       if (config.rotation[key] > 1) throw new Error(`config.js: rotation.${key} must be between 0 and 1.`);
     }
     if (config.rotation.restMaxSeconds < config.rotation.restMinSeconds) throw new Error('config.js: rotation.restMaxSeconds must be at least restMinSeconds.');
+    number('difficulty', 'peakRotationMultiplier', 1);
     if (typeof config.difficulty.enabled !== 'boolean') throw new Error('config.js: difficulty.enabled must be true or false.');
     for (const key of ['rampSeconds', 'minTransitionSeconds', 'maxTransitionSeconds']) number('difficulty', key, 0, true);
     if (config.difficulty.maxTransitionSeconds < config.difficulty.minTransitionSeconds) throw new Error('config.js: difficulty.maxTransitionSeconds must be at least minTransitionSeconds.');

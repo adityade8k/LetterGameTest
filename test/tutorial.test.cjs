@@ -130,14 +130,14 @@ test('special streams reflect each speed while effect previews preserve the roun
     const session=await make();toEffects(session);
     while(session.step.effect!==effect) {activate(session);finishEffect(session);}
     activate(session);
-    const remaining=session.game.remaining,letterSeconds=session.game.letterSeconds,tile=session.tiles[0],distance=tile.previewDistance;
+    const remaining=session.game.remaining,letterSeconds=session.game.letterSeconds,mistakes=session.game.mistakes,tile=session.tiles[0],distance=tile.previewDistance;
     session.advance(1);speedByEffect[effect]=tile.previewDistance-distance;
     session.advance(session.game.effects[effect]);
     assert.equal(session.game.remaining,remaining);assert.equal(session.game.letterSeconds,letterSeconds);
     assert.equal(session.game.current,'C');assert.equal(session.game.activeEffect,null);assert.equal(session.state.previewActive,false);
-    assert.equal(session.game.mistakes,0);assert.equal(session.game.phase,'running');
+    assert.equal(session.game.mistakes,mistakes);assert.equal(session.game.phase,'running');
   }
-  near(speedByEffect.hourglass,8);near(speedByEffect.fire,50);near(speedByEffect.smoke,20);
+  near(speedByEffect.hourglass,9.6);near(speedByEffect.fire,60);near(speedByEffect.smoke,24);
 });
 
 test('the same neutral stream continues smoothly across ice, fire and gas',async()=>{
@@ -150,9 +150,9 @@ test('the same neutral stream continues smoothly across ice, fire and gas',async
     const currentStream=session.tiles.filter(tile=>tile.tutorialDecorative);
     for(let index=0;index<stream.length;index++) {
       assert.equal(currentStream[index],stream[index]);
-      near(currentStream[index].previewDistance,distances[index]+18);
+      near(currentStream[index].previewDistance,distances[index]+21.6);
       const {top,bottom}=session.motionBand;
-      near(currentStream[index].y,top+(currentStream[index].baseY-top+distances[index]+18)%(bottom-top));
+      near(currentStream[index].y,top+(currentStream[index].baseY-top+distances[index]+21.6)%(bottom-top));
     }
   }
 });
@@ -177,8 +177,8 @@ test('reduced motion holds the stream still but still completes the tutorial eff
   assert.deepEqual(session.tiles.map(tile=>({x:tile.x,y:tile.y})),positions);
   activate(session);const remainingPositions=session.tiles.map(tile=>({x:tile.x,y:tile.y}));session.advance(2);
   assert.deepEqual(session.tiles.map(tile=>({x:tile.x,y:tile.y})),remainingPositions);
-  assert.equal(session.state.canContinue,false);near(session.game.effects.hourglass,5.5);
-  session.advance(5.5);assert.equal(session.game.activeEffect,null);assert.equal(session.game.phase,'running');
+  assert.equal(session.state.canContinue,false);near(session.game.effects.hourglass,session.game.config.hourglass.durationSeconds-2);
+  session.advance(session.game.effects.hourglass);assert.equal(session.game.activeEffect,null);assert.equal(session.game.phase,'running');
   assert.deepEqual(session.tiles.map(tile=>({x:tile.x,y:tile.y})),remainingPositions);
   assert.deepEqual(session.advance(.9),[{type:'tutorial-step',id:'fire'}]);
 });

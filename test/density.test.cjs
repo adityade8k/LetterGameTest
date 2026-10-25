@@ -11,7 +11,7 @@ test('density starts sparse, grows monotonically with scored words and caps at t
     const layout=viewportLayout(width,width*16/9),profile=n=>supplyProfile(layout,c.tiles.mobileSize,c,n);
     const initial=profile(0),full=profile(c.density.wordsToFull);
     assert.equal(initial.target,14);assert.equal(initial.limit,38);
-    assert.ok(Math.abs(initial.spawnSeconds-1.02857142857)<1e-9);
+    assert.ok(Math.abs(initial.spawnSeconds-c.falling.mobileSpawnSeconds/c.density.startFraction)<1e-9);
     assert.equal(full.target,Math.max(c.opening.mobileTiles,letterTarget(layout,c)));
     assert.equal(full.limit,streamLimit(layout,c.tiles.mobileSize,c));
     assert.equal(full.spawnSeconds,c.falling.mobileSpawnSeconds);

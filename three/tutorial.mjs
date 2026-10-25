@@ -183,7 +183,7 @@ export class TutorialSession {
     let dwell = this.completed ? dt : 0;
     if(this.step.effect && !this.reducedMotion) {
       const active = this.previewStarted ? Math.min(dt,this.game.effects[this.step.effect]) : 0;
-      const distance = 20*(active*this.game.worldTimeScale+dt-active);
+      const distance = 24*(active*this.game.worldTimeScale+dt-active);
       for(const tile of this.tiles)if(tile.tutorialDecorative) {
         tile.previewDistance += distance;
         tile.y = this.previewY(tile);

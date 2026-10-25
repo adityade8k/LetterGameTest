@@ -129,6 +129,10 @@
     get hasBonus() { return this.currentTiles.some(tile => tile.bonus); }
     get activeEffect() { return ['hourglass', 'smoke', 'fire'].find(effect => this.effects[effect] > 0) || null; }
     get timeScale() { return this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
+    get timerDrainMultiplier() {
+      const { mistakeGraceCount = 3, mistakeDrainStep = .01 } = this.config.timer;
+      return 1 + Math.max(0, this.mistakes - mistakeGraceCount) * mistakeDrainStep;
+    }
     get worldTimeScale() { return this.effects.fire > 0 ? this.config.fire.worldTimeScale : this.timeScale; }
     get maxTimeSeconds() { return this.config.timer.maxSeconds * this.config.timer.overtimeMultiplier; }
     get isWord() { return this.currentPrefixes.some(word=>this.dictionary.has(word)); }
@@ -167,25 +171,27 @@
       return timeout;
     }
     elapse(seconds) {
-      // Only ice changes countdown speed. All effect durations, including
-      // fire's faster tile motion, continue to use real active seconds.
+      // Mistakes accelerate only the round timer. Ice still slows both clocks;
+      // fire affects tile motion, and effect lifetimes use real active seconds.
       const effectSeconds = Math.min(seconds, this.effects.hourglass);
       const effectDrain = effectSeconds * this.timeScale;
       const drain = effectDrain + seconds - effectSeconds;
-      const activeSeconds = this.remaining <= effectDrain
-        ? this.remaining / this.timeScale
-        : Math.min(seconds, effectSeconds + this.remaining - effectDrain);
+      const multiplier = this.timerDrainMultiplier;
+      const clockBudget = this.remaining / multiplier;
+      const activeSeconds = clockBudget <= effectDrain
+        ? clockBudget / this.timeScale
+        : Math.min(seconds, effectSeconds + clockBudget - effectDrain);
       this.elapsed += activeSeconds;
       this.comboSeconds = Math.max(0, this.comboSeconds - activeSeconds);
       if (this.comboSeconds <= 1e-9) this.resetCombo(); // Ignore floating-point residue at the boundary.
-      // Both countdowns spend the same scaled time; the combo and effect
-      // durations continue to use real active seconds.
-      if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - Math.min(drain, this.remaining));
+      // The word deadline keeps its full budget even after mistakes. Clip its
+      // elapsed time at the exact instant the faster round clock runs out.
+      if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - Math.min(drain, clockBudget));
       for (const effect of ['hourglass', 'smoke', 'fire']) {
         const remaining = this.effects[effect] - activeSeconds;
         this.effects[effect] = remaining <= 1e-9 ? 0 : remaining;
       }
-      this.remaining = Math.max(0, this.remaining - drain);
+      this.remaining = Math.max(0, this.remaining - drain * multiplier);
       if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); return { type: 'ended' }; }
       return null;
     }
@@ -302,12 +308,13 @@
       const word = this.current;
       this.clearCurrentWord();
       const discarded = reason === 'clear' || reason === 'timeout';
-      if (!discarded) this.mistakes++;
+      // A deliberate delete is a mistake too; an automatic timeout is not.
+      if (reason !== 'timeout') this.mistakes++;
       const penaltyKey = discarded ? 'clearWordSeconds' : 'invalidWordSeconds';
       const penalty = this.config.penalties[penaltyKey];
       this.remaining = Math.max(0, this.remaining - penalty);
       if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); }
-      return { type: 'penalty', reason, word, penalty, ended: this.phase === 'over' };
+      return { type: 'penalty', reason, word, penalty, mistakes: this.mistakes, timerDrainMultiplier: this.timerDrainMultiplier, ended: this.phase === 'over' };
     }
     undo(now) {
       const end = this.advance(now);

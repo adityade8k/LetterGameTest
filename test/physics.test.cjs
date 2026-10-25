@@ -82,7 +82,7 @@ test('zero dt freezes motion and zero rotation or reduced motion prevents turns'
  const off=createConfig({rotation:{minDegreesPerSecond:0,maxDegreesPerSecond:0}}),b=tile(p,off,180,100,'Q',.3);
  const stoppedPhase=b.spinPhase;p.stepTiles([b],3,{width:360,size:47,speed:29,config:off});assert.equal(b.tilt,0);assert.equal(b.spinPhase,stoppedPhase);assert.equal(b.pitch,0);
 });
-test('ordinary and high-value letters turn only around Y within their configured speeds',async()=>{
+test('ordinary and high-value letters retain base speeds and turn only around Y at boosted hard peaks',async()=>{
  const p=await physics,c=createConfig({rotation:{ordinarySpinChance:0,highValueSpinChance:1,minDegreesPerSecond:10,maxDegreesPerSecond:20}}),random=rng(8);
  const a=tile(p,c,80,100,'A',.3,random),q=tile(p,c,260,100,'Q',-.4,random);
  assert.ok(Math.abs(q.rotationSpeed)>=15*Math.PI/180&&Math.abs(q.rotationSpeed)<=20*Math.PI/180);
@@ -91,7 +91,7 @@ test('ordinary and high-value letters turn only around Y within their configured
  for(const t of [a,q]){
   assert.ok(Math.abs(t.spinPhase-initialPhase.get(t))>.7);assert.equal(t.pitch,0);assert.equal(t.tilt,0);
   assert.equal(t.pitchOffset,0);assert.equal(t.yawOffset,0);
-  assert.ok(Math.abs(t.spinPhase-(initialPhase.get(t)+t.rotationSpeed*6)%(2*Math.PI))<1e-8);
+  assert.ok(Math.abs(t.spinPhase-(initialPhase.get(t)+t.rotationSpeed*c.difficulty.peakRotationMultiplier*6)%(2*Math.PI))<1e-8);
  }
 });
 test('invalid physical tuning and turn probabilities are rejected',()=>{
@@ -131,7 +131,7 @@ test('Y-only letters keep the exact speed and zero X/Z pose across frames and di
   for(let frame=0;frame<600;frame++){
    const difficultyLevel=(1+Math.sin(frame/30))/2;
    p.stepTiles([t],1/60,{width:360,size:47,speed:0,config:c,difficultyLevel});
-   expected+=20*Math.PI/180*difficultyLevel/60;
+   expected+=20*Math.PI/180*p.difficultyRotationFactor(difficultyLevel,c.difficulty.peakRotationMultiplier)/60;
    assert.equal(t.pitch,0);assert.equal(t.tilt,0);
    assert.ok(Math.abs(t.spinPhase-expected%(2*Math.PI))<1e-8);
   }
@@ -162,7 +162,7 @@ test('letters born together have independent readable phases and never reset pha
  p.stepTiles(letters,1,{...options,difficultyLevel:0});assert.deepEqual(letters.map(t=>t.spinPhase),initial);
  p.stepTiles(letters,1,{...options,difficultyLevel:.6});
  for(const [i,t] of letters.entries()){
-  assert.ok(Math.abs(t.spinPhase-initial[i]-t.rotationSpeed*.6)<1e-8);
+  assert.ok(Math.abs(t.spinPhase-initial[i]-t.rotationSpeed*.6312)<1e-8);
   assert.equal(t.pitch,0);assert.equal(t.tilt,0);
  }
  const angles=letters.map(t=>t.spinPhase);

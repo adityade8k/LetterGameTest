@@ -7,7 +7,7 @@ const timing={nextLetterSeconds:2,extensionSecondsPerLetter:.5};
 const create=(options={})=>{const game=new WordGame(['CAT','CATCH','CATS','DOG'],{...options,rules:{...timing,...options.rules}});game.start(0);return game;};
 // Keep the established clock-integration fixtures at explicit five-second
 // letter windows and slow-time effects. The configured two-second letter window
-// and 7.5-second ice duration have separate coverage below.
+// and six-second ice duration have separate coverage below.
 const createFiveSecondFixture=(options={})=>create({...options,rules:{nextLetterSeconds:5,...options.rules},hourglass:{durationSeconds:5,...options.hourglass}});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} versus ${b}`);
 
@@ -164,11 +164,11 @@ test('a long word keeps its extended window through pause and slow-time expiry',
   const game=new WordGame(['ELEPHANT'],{rules:timing});game.start(0);
   for(const letter of 'ELEPHANT')game.select(letter,0);
   game.activate('hourglass',0);game.pause(2000);
-  near(game.letterSeconds,3.2);near(game.effects.hourglass,5.5);
-  game.resume(100000);assert.equal(game.advance(105500),null);
-  near(game.letterSeconds,1);assert.equal(game.effects.hourglass,0);near(game.letterWindow,4);
-  assert.equal(game.advance(106499),null);assert.equal(game.advance(106500).word,'ELEPHANT');
-  near(game.elapsed,8.5);
+  near(game.letterSeconds,3.2);near(game.effects.hourglass,4);
+  game.resume(100000);assert.equal(game.advance(104000),null);
+  near(game.letterSeconds,1.6);assert.equal(game.effects.hourglass,0);near(game.letterWindow,4);
+  assert.equal(game.advance(105599),null);assert.equal(game.advance(105600).word,'ELEPHANT');
+  near(game.elapsed,7.6);
 });
 
 test('word-length extensions are configurable and validated',()=>{

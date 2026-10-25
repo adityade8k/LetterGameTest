@@ -173,7 +173,7 @@ test('help describes staged gold, ice, smoke and fire tile introductions',suppor
   assert.match(description,/Ice tiles first appear after 6 scored words/);
   assert.match(description,/Gold tiles first appear after 3 words/);
   assert.match(description,/Magenta smoke tiles appear after 10 words/);
-  assert.match(description,/Fire tiles appear after 12 words.*2.5 times faster for 7.5 seconds/);
+  assert.match(description,/Fire tiles appear after 12 words.*2.5 times faster for 6 seconds/);
   assert.match(description,/Both timers keep their normal pace during fire/);
   assert.match(description,/Six-letter words refill to 45 seconds, or add 10 seconds/);
   assert.match(description,/Seven-letter words refill the normal bar without reducing overtime/);
@@ -283,8 +283,8 @@ test('the round clock has its own prominent rail below controls and fire leaves 
     for(const part of control.root.children)if(part.visible&&part.isMesh&&part.geometry.type==='ExtrudeGeometry')bounds.expandByObject(part);
     assert.ok(trackBox.max.y<bounds.min.y-3,'rail clears the pause cap and its foot');
   }
-  const ordinaryMaterial=timer.material;game.effects.fire=7.5;sync();assert.equal(timer.material,ordinaryMaterial,'fire does not imply a faster clock');
-  game.effects.fire=0;game.effects.hourglass=7.5;sync();assert.notEqual(timer.material,ordinaryMaterial,'ice still indicates its slowed clock');
+  const ordinaryMaterial=timer.material;game.effects.fire=game.config.fire.durationSeconds;sync();assert.equal(timer.material,ordinaryMaterial,'fire does not imply a faster clock');
+  game.effects.fire=0;game.effects.hourglass=game.config.hourglass.durationSeconds;sync();assert.notEqual(timer.material,ordinaryMaterial,'ice still indicates its slowed clock');
   game.effects.hourglass=0;game.remaining=10;sync();assert.notEqual(timer.material,ordinaryMaterial,'low time remains prominent');
 });
 

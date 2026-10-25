@@ -52,19 +52,38 @@ test('pause freezes active difficulty, hourglass keeps the active timeline, and 
   assert.equal(disabled.valueAt(600),0);
 });
 
-test('Y phase stops exactly at easy and scales with difficulty for ordinary and valuable letters',async()=>{
+test('Y phase stops at easy and increases smoothly beyond normal speed at hard peaks',async()=>{
   const [,physics]=await modules,config=createConfig();
   for(const letter of ['A','Q']){
     const make=()=>physics.prepareTile({kind:'letter',letter,x:180,y:100,tilt:.2},config,rng(9));
     const options={width:360,size:47,speed:0,config},initialPhase=make().spinPhase;
     const easy=make();physics.stepTiles([easy],3,{...options,difficultyLevel:0});assert.equal(easy.spinPhase,initialPhase);assert.equal(easy.pitch,0);assert.equal(easy.tilt,0);
     const low=make(),high=make();physics.stepTiles([low],1,{...options,difficultyLevel:.25});physics.stepTiles([high],1,{...options,difficultyLevel:.75});
-    near(high.spinPhase-initialPhase,3*(low.spinPhase-initialPhase));near(high.spinPhase-initialPhase,high.rotationSpeed*.75);
+    near(low.spinPhase-initialPhase,low.rotationSpeed*.25);near(high.spinPhase-initialPhase,high.rotationSpeed*.9375);
+    assert.ok(Math.abs(high.spinPhase-initialPhase)>3*Math.abs(low.spinPhase-initialPhase));
     assert.ok(Math.abs(high.rotationSpeed)<=config.rotation.maxDegreesPerSecond*Math.PI/180);
     const angle=high.spinPhase;physics.stepTiles([high],2,{...options,difficultyLevel:0});near(high.spinPhase,angle);assert.equal(high.pitch,0);assert.equal(high.tilt,0);
     const reduced=make();physics.stepTiles([reduced],1,{...options,difficultyLevel:1,reducedMotion:true});near(reduced.spinPhase,initialPhase);
     const invalid=make();physics.stepTiles([invalid],1,{...options,difficultyLevel:NaN});near(invalid.spinPhase,initialPhase);
-    const capped=make();physics.stepTiles([capped],1,{...options,difficultyLevel:9});near(capped.spinPhase-initialPhase,capped.rotationSpeed);
+    const capped=make();physics.stepTiles([capped],1,{...options,difficultyLevel:9});near(capped.spinPhase-initialPhase,capped.rotationSpeed*config.difficulty.peakRotationMultiplier);
+  }
+});
+
+test('hard rotation boost preserves the easy half and joins without speed jumps',async()=>{
+  const [,{difficultyRotationFactor:factor}]=await modules;
+  for(const level of [0,.1,.25,.5])near(factor(level,1.5),level);
+  near(factor(.75,1.5),.9375);near(factor(1,1.5),1.5);
+  near(factor(-1,1.5),0);near(factor(2,1.5),1.5);near(factor(NaN,1.5),0);
+  // Both ends of the added boost have a flat slope, so crossing the hard
+  // threshold or reaching the peak never introduces a sudden speed change.
+  const epsilon=1e-5;
+  assert.ok(Math.abs((factor(.5+epsilon,1.5)-factor(.5,1.5))/epsilon-1)<.0001);
+  assert.ok(Math.abs((factor(1,1.5)-factor(1-epsilon,1.5))/epsilon-1.5)<.0001);
+  let previous=0;
+  for(let i=0;i<=100;i++){
+    const level=i/100,value=factor(level,1.5);
+    assert.ok(value>=previous&&value<=1.5);near(factor(level,1),level);
+    previous=value;
   }
 });
 
@@ -80,5 +99,5 @@ test('letter motion follows hourglass scale but pickup Y rotation is independent
 });
 
 test('difficulty rejects invalid timing, reversed bounds and invalid target counts',()=>{
-  for(const difficulty of [{enabled:1},{rampSeconds:0},{rampSeconds:NaN},{minTransitionSeconds:0},{maxTransitionSeconds:Infinity},{minTransitionSeconds:20,maxTransitionSeconds:10},{levelSteps:0},{levelSteps:1.5},{levelSteps:21}])assert.throws(()=>createConfig({difficulty}),/difficulty/);
+  for(const difficulty of [{enabled:1},{rampSeconds:0},{rampSeconds:NaN},{minTransitionSeconds:0},{maxTransitionSeconds:Infinity},{minTransitionSeconds:20,maxTransitionSeconds:10},{levelSteps:0},{levelSteps:1.5},{levelSteps:21},{peakRotationMultiplier:0},{peakRotationMultiplier:.99},{peakRotationMultiplier:NaN},{peakRotationMultiplier:Infinity}])assert.throws(()=>createConfig({difficulty}),/difficulty/);
 });

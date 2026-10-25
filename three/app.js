@@ -154,7 +154,9 @@ function handle(result){
     feedback(`${result.word} / Already found / +0`,'repeat');sound('repeat');
   }else if(result.type==='penalty'){
     const reason={clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
-    feedback(`${reason} / -${format(result.penalty)}s`,'bad');sound(result.reason==='clear'?'clear':'invalid');
+    const fasterDrain=result.reason!=='timeout'&&result.timerDrainMultiplier>1&&game.phase==='running'
+      ?` / Timer ${Math.round((result.timerDrainMultiplier-1)*100)}% faster`:'';
+    feedback(`${reason} / -${format(result.penalty)}s${fasterDrain}`,'bad');sound(result.reason==='clear'?'clear':'invalid');
   }else if(result.type==='effect'){
     if(result.effect==='smoke'){scene.releaseSmoke(result.origin);feedback('Smoke!','smoke');sound('grenade');}
     else{view.feedback='';view.feedbackKind='';feedbackUntil=0;sound(result.effect==='fire'?'fire':'hourglass');}

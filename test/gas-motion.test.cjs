@@ -95,9 +95,9 @@ test('gas entry and dissolve remain frozen on pause and finish on active time',(
     const settings=game.config.smoke,patch=smokePatches(360,640,settings,random(8))[0];
     const pose=()=>smokePose(patch,settings.durationSeconds-game.effects.smoke,game.effects.smoke,360,640,settings);
     game.pause(pauseMs);const frozen=pose();game.advance(100000);assert.deepEqual(pose(),frozen);
-    game.resume(100000);game.advance(100000+4400-pauseMs);
+    game.resume(100000);game.advance(100000+(settings.durationSeconds-settings.fadeOutSeconds/2)*1000-pauseMs);
     near(pose().dissolve,.5);near(pose().opacity,.5);
-    game.advance(100000+5000-pauseMs);near(pose().opacity,0);near(pose().dissolve,1);
+    game.advance(100000+settings.durationSeconds*1000-pauseMs);near(pose().opacity,0);near(pose().dissolve,1);
     assert.equal(game.activeEffect,null);
   }
 });

@@ -8,60 +8,60 @@ const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8,
 const create = (options, random = () => 0) => { const game = new WordGame(dictionary, {specialTiles:{warmupSeconds:0}, ...options}, random); game.start(0); return game; };
 const spell = (game, word, now = 0, goldIndices = []) => [...word].map((letter, index) => game.select(letter, now, { bonus: goldIndices.includes(index) })).at(-1);
 
-test('hourglass runs for 7.5 unscaled seconds and slows the clock to 40 percent', () => {
+test('hourglass runs for 6 unscaled seconds and slows the clock to 40 percent', () => {
   const game = create();
-  assert.equal(game.activate('hourglass', 0).duration, 7.5);
+  assert.equal(game.activate('hourglass', 0).duration, 6);
   assert.equal(game.timeScale, .4);
   game.advance(2000);
   near(game.remaining, 59.2);
-  near(game.effects.hourglass, 5.5);
-  game.advance(7500);
-  near(game.remaining, 57);
+  near(game.effects.hourglass, 4);
+  game.advance(6000);
+  near(game.remaining, 57.6);
   assert.equal(game.effects.hourglass, 0);
   assert.equal(game.timeScale, 1);
-  game.advance(8500);
-  near(game.remaining, 56);
+  game.advance(7000);
+  near(game.remaining, 56.6);
 });
 test('a frame crossing effect expiry drains both slow and normal time accurately', () => {
   const game = create(); game.activate('hourglass', 0); game.advance(8000);
-  near(game.remaining, 56.5);
+  near(game.remaining, 55.6);
   near(game.elapsed, 8);
   assert.equal(game.effects.hourglass, 0);
 });
-test('ice suppresses a smoke pickup and keeps its 7.5-second lifetime', () => {
+test('ice suppresses a smoke pickup and keeps its 6-second lifetime', () => {
   const game = create();
   game.activate('hourglass', 0); assert.equal(game.activate('smoke', 0).type, 'ignored');
   game.advance(4000);
   near(game.effects.smoke, 0);
-  near(game.effects.hourglass, 3.5);
+  near(game.effects.hourglass, 2);
   game.advance(5000);
-  assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
+  assert.deepEqual(game.effects, { hourglass: 1, smoke: 0, fire: 0 });
   near(game.remaining, 58);
-  game.advance(7500);
+  game.advance(6000);
   assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
-  near(game.remaining, 57);
+  near(game.remaining, 57.6);
 });
 test('pause freezes the active effect; suppressed effects stay off after resume', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('smoke', 0);
   game.pause(2000); game.advance(100000);
   assert.equal(game.activate('smoke', 100000).type, 'ignored');
-  near(game.effects.hourglass, 5.5); near(game.effects.smoke, 0);
+  near(game.effects.hourglass, 4); near(game.effects.smoke, 0);
   game.resume(100000); game.advance(103000);
-  assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
+  assert.deepEqual(game.effects, { hourglass: 1, smoke: 0, fire: 0 });
   near(game.remaining, 58);
   near(game.elapsed, 5);
-  game.advance(105500);
+  game.advance(104000);
   assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
-  near(game.remaining, 57);near(game.elapsed, 7.5);
+  near(game.remaining, 57.6);near(game.elapsed, 6);
 });
 test('a second pickup cannot refresh or extend the active duration', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('hourglass', 4000);
-  assert.equal(game.effects.hourglass, 3.5);
+  assert.equal(game.effects.hourglass, 2);
   assert.equal(game.timeScale, .4);
   game.advance(11500);
-  near(game.remaining, 53);
+  near(game.remaining, 52.1);
   assert.equal(game.timeScale, 1);
 });
 test('effects preserve the pending word, bonus letters and points', () => {
@@ -77,7 +77,7 @@ test('slow time does not reduce fixed penalties', () => {
   const game = create(); game.activate('hourglass', 0);
   spell(game, 'CAT', 1000); game.undo(1000);
   near(game.remaining, 57.6);
-  assert.equal(game.effects.hourglass, 6.5);
+  assert.equal(game.effects.hourglass, 5);
 });
 test('late pickups cannot revive an expired game and effects clear on game over', () => {
   const late = create();
@@ -198,8 +198,8 @@ test('misspellings and blanks cannot activate or refresh smoke from old letter f
   const game = create();game.activate('smoke',0);
   game.select('C',1000,{grenade:true});game.select('A',1500,{grenade:true});game.select('T',1500);
   assert.equal(game.select('Q',1500,{grenade:true}).smokeTriggered,undefined);
-  assert.equal(game.current,'');near(game.effects.smoke,3.5);
-  game.select('?',2000,{grenade:true});near(game.effects.smoke,3);
+  assert.equal(game.current,'');near(game.effects.smoke,2.5);
+  game.select('?',2000,{grenade:true});near(game.effects.smoke,2);
   assert.equal(game.currentTiles[0].grenade,false);
 });
 const seededRandom = seed => () => {
@@ -241,11 +241,12 @@ test('invalid effect settings are rejected before a round starts', () => {
 
 
 test('pink smoke fades smoothly, holds an opaque center, and ends on time',()=>{
- const s=createConfig().smoke;
- near(smokeEnvelope(0,5,s),0);near(smokeEnvelope(s.fadeInSeconds/2,5-s.fadeInSeconds/2,s),.5);
- near(smokeEnvelope(1,4,s),1);near(smokeEnvelope(3,2,s),1);
- near(smokeEnvelope(5-s.fadeOutSeconds/2,s.fadeOutSeconds/2,s),.5);near(smokeEnvelope(5,0,s),0);
- near(smokeEnvelope(.1,4.9,s,.12),0);
+ const s=createConfig().smoke,duration=s.durationSeconds;
+ assert.equal(duration,4);
+ near(smokeEnvelope(0,duration,s),0);near(smokeEnvelope(s.fadeInSeconds/2,duration-s.fadeInSeconds/2,s),.5);
+ near(smokeEnvelope(1,duration-1,s),1);near(smokeEnvelope(duration-s.fadeOutSeconds,s.fadeOutSeconds,s),1);
+ near(smokeEnvelope(duration-s.fadeOutSeconds/2,s.fadeOutSeconds/2,s),.5);near(smokeEnvelope(duration,0,s),0);
+ near(smokeEnvelope(.1,duration-.1,s,.12),0);
  assert.throws(()=>createConfig({smoke:{fadeInSeconds:4,fadeOutSeconds:2}}));
  assert.throws(()=>createConfig({smoke:{driftPixelsPerSecond:-1}}));
 });
@@ -254,8 +255,8 @@ test('settled smoke keeps its broad shape and dissolves in place even with exces
   const s=createConfig().smoke;
   for(const [width,height] of [[360,780],[900,640]]){
     for(const patch of smokePatches(width,height,s,seededRandom(36))){
-      for(let tick=15;tick<=50;tick++){
-        const age=tick/10,remaining=5-age;
+      for(let tick=15;tick<=s.durationSeconds*10;tick++){
+        const age=tick/10,remaining=s.durationSeconds-age;
         for(const driftPixelsPerSecond of [0,s.driftPixelsPerSecond,1000]){
           const settings={...s,driftPixelsPerSecond};
           const pose=smokePose(patch,age,remaining,width,height,settings);
@@ -280,7 +281,7 @@ test('side-entry smoke freezes during pause and dissolves on active time while b
   game.pause(2000);
   const frozen=pose();
   game.advance(100000);assert.deepEqual(pose(),frozen);assert.equal(frozen.opacity,1);
-  game.resume(100000);game.advance(102400);
+  game.resume(100000);game.advance(100000+(s.durationSeconds-s.fadeOutSeconds/2)*1000-2000);
   near(game.effects.smoke,.6);near(pose().opacity,.5);
-  game.advance(103000);near(game.effects.smoke,0);near(pose().opacity,0);
+  game.advance(100000+s.durationSeconds*1000-2000);near(game.effects.smoke,0);near(pose().opacity,0);
 });

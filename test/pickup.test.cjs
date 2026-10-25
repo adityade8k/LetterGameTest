@@ -76,7 +76,7 @@ test('special progression milestones are ordered, configurable positive word cou
 test('selecting a colored letter adds the letter and triggers only its own effect immediately',()=>{
  for(const effect of ['smoke','hourglass','fire']){
    const game=make(),result=game.select('C',0,{effect,bonus:true});
-   const duration=effect==='smoke'?5:7.5;
+   const duration=game.config[effect].durationSeconds;
    assert.equal(result.type,'letter');assert.deepEqual(result.tileEffect,{effect,duration});
    assert.equal(game.current,'C');assert.equal(game.currentTiles[0].effect,effect);assert.equal(game.currentTiles[0].bonus,false);assert.equal(result.goldCollected,undefined);
    assert.equal(game.effects[effect],duration);assert.equal(game.effects[effect==='smoke'?'hourglass':'smoke'],0);
@@ -101,11 +101,11 @@ test('gold collection feedback fires for a consumed tile and does not leak throu
 test('blue letters slow both clocks and suppress smoke letters through pause until expiry',()=>{
  const game=make({rules:{nextLetterSeconds:2}});game.select('C',0,{effect:'hourglass'});game.advance(1000);
  near(game.remaining,59.6);near(game.letterSeconds,1.6);
- assert.equal(game.select('A',1000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,6.5);
- assert.equal(game.select('T',2000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,5.5);
- game.pause(2000);game.advance(100000);near(game.effects.smoke,0);near(game.effects.hourglass,5.5);
- game.resume(100000);game.advance(103000);near(game.effects.hourglass,2.5);near(game.effects.smoke,0);
- game.advance(105500);near(game.effects.hourglass,0);near(game.effects.smoke,0);
+ assert.equal(game.select('A',1000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,5);
+ assert.equal(game.select('T',2000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,4);
+ game.pause(2000);game.advance(100000);near(game.effects.smoke,0);near(game.effects.hourglass,4);
+ game.resume(100000);game.advance(103000);near(game.effects.hourglass,1);near(game.effects.smoke,0);
+ game.advance(104000);near(game.effects.hourglass,0);near(game.effects.smoke,0);
  game.start(200000);assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:0});
 });
 
