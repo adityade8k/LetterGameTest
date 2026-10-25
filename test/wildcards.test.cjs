@@ -24,11 +24,11 @@ test('wildcards keep every viable interpretation open as the word grows',()=>{
   const result=game.submit(0);assert.equal(result.word,'CATCH');assert.equal(result.points,11);assert.equal(result.requestedReward,13.2);
 });
 
-test('ambiguous blanks prefer an unused matching word, then apply the repeat penalty',()=>{
+test('ambiguous blanks prefer an unused matching word, then return a neutral repeat',()=>{
   const game=create(['CAT','COT']);spell(game,'CAT');game.submit(0);
   spell(game,'C?T');assert.equal(game.isRepeat,false);assert.equal(game.submit(0).word,'COT');
   const before=game.remaining;spell(game,'C?T');assert.equal(game.isRepeat,true);
-  const repeat=game.submit(0);assert.equal(repeat.reason,'repeat');assert.equal(game.remaining,before-2);
+  const repeat=game.submit(0);assert.equal(repeat.type,'repeat');assert.equal(repeat.points,0);assert.equal(game.remaining,before);
   assert.deepEqual(game.words,['CAT','COT']);assert.equal(game.score,9);
 });
 
@@ -41,25 +41,25 @@ test('a blank does not bypass impossible-prefix, incomplete-word, clear, or rest
   spell(game,'CATCH');assert.equal(game.submit(0).points,12);
 });
 
-test('blanks cannot gain points or gold time from their resolved letter',()=>{
+test('blanks cannot gain points or carry gold; a real gold letter doubles only actual tile points',()=>{
   const game=create(['CAT']);game.select('C',0,{bonus:true});game.select('?',0,{bonus:true,grenade:true});game.select('T',0);
   assert.equal(game.effects.smoke,0);assert.equal(game.currentTiles[1].bonus,false);
-  const result=game.submit(0);assert.equal(result.points,4);
-  assert.ok(Math.abs(result.requestedReward-.7)<1e-9);assert.ok(Math.abs(result.bonusReward-.3)<1e-9);
+  const result=game.submit(0);assert.equal(result.points,8);assert.equal(result.basePoints,4);
+  assert.ok(Math.abs(result.requestedReward-.4)<1e-9);assert.equal(result.bonusReward,0);
 });
 
-test('default long-word rewards combine zero-value blanks with additive gold time at 1.2 seconds per point',()=>{
+test('automatic long-word scoring doubles actual points while retaining base-letter time rewards',()=>{
   const game=create(['CATCH']);
   game.select('C',0,{bonus:true});game.select('?',0,{bonus:true});
   for(const letter of 'TCH')game.select(letter,0);
-  assert.equal(game.advance(4499),null);
-  const result=game.advance(4500);
+  assert.equal(game.advance(2499),null);
+  const result=game.advance(2500);
   assert.equal(result.automatic,true);assert.equal(result.word,'CATCH');assert.equal(result.blankCount,1);
-  assert.equal(result.points,11);assert.equal(game.score,11);
+  assert.equal(result.points,22);assert.equal(game.score,22);assert.equal(result.basePoints,11);
   assert.equal(result.selectedTiles[1].bonus,false);
-  assert.ok(Math.abs(result.bonusReward-3.6)<1e-9);
-  assert.ok(Math.abs(result.requestedReward-16.8)<1e-9);
-  assert.equal(result.reward,4.5); // 60-second default cap: only 4.5s of room, not all potential time.
+  assert.equal(result.bonusReward,0);
+  assert.ok(Math.abs(result.requestedReward-13.2)<1e-9);
+  assert.equal(result.reward,2.5); // 60-second default cap: only 2.5s of room, not all potential time.
 });
 
 test('continuation help honors wildcard positions and excludes collected matches',async()=>{

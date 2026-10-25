@@ -3,23 +3,23 @@ const assert=require('node:assert/strict');
 const {WordGame}=require('../engine.js');
 const {createConfig}=require('../config.js');
 const create=options=>{const game=new WordGame(['CAT','CATCH','CATS','DOG'],options);game.start(0);return game;};
-// Keep the established exact slow-time boundary fixtures at an explicit five
-// seconds. Default 4.5-second reset, pause and auto-submit behavior is covered
-// below and in combo.test.cjs instead of changing the fixtures' time algebra.
-const createFiveSecondFixture=(options={})=>create({...options,rules:{nextLetterSeconds:5,...options.rules}});
+// Keep the established clock-integration fixtures at explicit five-second
+// letter windows and slow-time effects. The default two-second letter window
+// and 7.5-second ice duration have separate coverage below.
+const createFiveSecondFixture=(options={})=>create({...options,rules:{nextLetterSeconds:5,...options.rules},hourglass:{durationSeconds:5,...options.hourglass}});
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} versus ${b}`);
 
-test('each accepted letter resets the default 4.5-second deadline, including blanks',()=>{
-  const game=create();game.select('C',1000);game.advance(5499);
+test('each accepted letter resets the default two-second deadline, including blanks',()=>{
+  const game=create();game.select('C',1000);game.advance(2999);
   assert.equal(game.current,'C');near(game.letterSeconds,.001);
-  game.select('?',5499);near(game.letterSeconds,4.5);
-  game.select('T',9998);game.select('C',9998);near(game.letterSeconds,4.5);
-  assert.equal(game.advance(14497),null);
-  const result=game.advance(14498);
+  game.select('?',2999);near(game.letterSeconds,2);
+  game.select('T',4998);game.select('C',4998);near(game.letterSeconds,2);
+  assert.equal(game.advance(6997),null);
+  const result=game.advance(6998);
   assert.equal(result.reason,'timeout');assert.equal(result.penalty,2);
   assert.equal(game.current,'');assert.equal(game.letterSeconds,0);
   assert.deepEqual(game.currentTiles,[]);assert.deepEqual(game.currentPrefixes,['']);
-  near(game.remaining,43.502);assert.equal(game.score,0);assert.equal(game.wordCount,0);
+  near(game.remaining,51.002);assert.equal(game.score,0);assert.equal(game.wordCount,0);
   game.advance(20000);near(game.remaining,38); // Never charges a second discard.
 });
 
@@ -32,8 +32,8 @@ test('submitting before the deadline cancels it without altering word rewards',(
 test('late input cannot submit unfinished expired words or consume an unselected tile',()=>{
   for(const action of ['submit','select','undo','collectHourglass']){
     const game=create();for(const l of 'CA')game.select(l,0);game.hourglassOffer=true;
-    const result=action==='select'?game.select('C',4500,{grenade:true}):game[action](4500);
-    assert.equal(result.reason,'timeout');assert.equal(game.current,'');near(game.remaining,53.5);
+    const result=action==='select'?game.select('C',2000,{grenade:true}):game[action](2000);
+    assert.equal(result.reason,'timeout');assert.equal(game.current,'');near(game.remaining,56);
     assert.equal(game.score,0);assert.equal(game.effects.smoke,0);
     if(['select','collectHourglass'].includes(action))assert.equal(result.consumed,false);
   }
@@ -41,11 +41,11 @@ test('late input cannot submit unfinished expired words or consume an unselected
 
 test('pause freezes the letter deadline, and a pause at expiry still pauses',()=>{
   const game=create();game.select('C',0);game.pause(750);game.advance(100000);
-  near(game.letterSeconds,3.75);game.resume(100000);game.advance(103749);
-  assert.equal(game.current,'C');assert.equal(game.advance(103750).reason,'timeout');
-  near(game.remaining,53.5);
+  near(game.letterSeconds,1.25);game.resume(100000);game.advance(101249);
+  assert.equal(game.current,'C');assert.equal(game.advance(101250).reason,'timeout');
+  near(game.remaining,56);
   const other=create();other.select('C',0);
-  assert.equal(other.pause(4500).reason,'timeout');assert.equal(other.phase,'paused');
+  assert.equal(other.pause(2000).reason,'timeout');assert.equal(other.phase,'paused');
 });
 
 test('the word countdown follows slow time and integrates across effect expiry',()=>{
@@ -104,17 +104,17 @@ test('pause preserves both the hourglass and slowed letter countdown',()=>{
   assert.equal(game.advance(106000).reason,'timeout');near(game.remaining,53);
 });
 
-test('slow time also stretches a combo window and honors it across combo expiry',()=>{
+test('slow time stretches a longer word window independently of combo expiry',()=>{
   const game=createFiveSecondFixture();
   for(const [i,word] of ['CAT','CATS','DOG'].entries()){
     for(const l of word)game.select(l,i*1000);game.submit(i*1000);
   }
-  near(game.nextLetterWindow,5.25);game.activate('hourglass',3000);
+  near(game.nextLetterWindow,5);game.activate('hourglass',3000);
   for(const l of 'CATCH')game.select(l,3000);
-  near(game.letterSeconds,5.25);near(game.secondsUntilWordTimeout,8.25);
-  assert.equal(game.advance(8000),null);near(game.letterSeconds,3.25);
-  game.advance(10000);assert.equal(game.comboCount,0);near(game.letterSeconds,1.25);
-  const result=game.advance(11250);
+  near(game.letterSeconds,5.5);near(game.secondsUntilWordTimeout,8.5);
+  assert.equal(game.advance(8000),null);near(game.letterSeconds,3.5);
+  game.advance(10000);assert.equal(game.comboCount,0);near(game.letterSeconds,1.5);
+  const result=game.advance(11500);
   assert.equal(result.word,'CATCH');assert.equal(result.points,12);assert.equal(game.comboCount,1);
   near(game.nextLetterWindow,5);
 });
@@ -131,4 +131,50 @@ test('one long frame and small frames resolve slow word formation at the same ti
   near(large.elapsed,small.elapsed);assert.deepEqual(large.words,small.words);
   assert.equal(large.score,5);assert.equal(large.current,'');assert.equal(small.current,'');
   assert.equal(large.effects.hourglass,0);assert.equal(small.effects.hourglass,0);
+});
+
+
+test('the fifth letter extends the window, and every further letter adds half a second',()=>{
+  const game=new WordGame(['ELEPHANT']);game.start(0);
+  const durations=[2,2,2,2,2.5,3,3.5,4];
+  let now=0;
+  for(const [index,letter] of [...'ELEPHANT'].entries()){
+    if(index)now+=durations[index-1]*1000-1;
+    const result=game.select(letter,now);
+    assert.equal(result.type,'letter');
+    near(game.letterWindowSeconds,durations[index]);near(game.letterWindow,durations[index]);near(game.letterSeconds,durations[index]);
+  }
+  assert.equal(game.advance(now+3999),null);
+  const result=game.advance(now+4000);
+  assert.equal(result.type,'word');assert.equal(result.word,'ELEPHANT');assert.equal(result.automatic,true);
+  assert.equal(game.wordCount,1);near(game.letterWindowSeconds,2);near(game.letterWindow,2);
+  game.select('E',now+4000);near(game.letterSeconds,2);
+});
+
+test('a fifth letter at the old deadline cannot rescue an incomplete four-letter prefix',()=>{
+  const game=create();for(const letter of 'CATC')game.select(letter,0);
+  const result=game.select('H',2000);
+  assert.equal(result.reason,'timeout');assert.equal(result.consumed,false);assert.equal(game.wordCount,0);
+  assert.equal(game.current,'');near(game.remaining,56);
+});
+
+test('a long word keeps its extended window through pause and slow-time expiry',()=>{
+  const game=new WordGame(['ELEPHANT']);game.start(0);
+  for(const letter of 'ELEPHANT')game.select(letter,0);
+  game.activate('hourglass',0);game.pause(2000);
+  near(game.letterSeconds,3.2);near(game.effects.hourglass,5.5);
+  game.resume(100000);assert.equal(game.advance(105500),null);
+  near(game.letterSeconds,1);assert.equal(game.effects.hourglass,0);near(game.letterWindow,4);
+  assert.equal(game.advance(106499),null);assert.equal(game.advance(106500).word,'ELEPHANT');
+  near(game.elapsed,8.5);
+});
+
+test('word-length extensions are configurable and validated',()=>{
+  const game=create({rules:{nextLetterSeconds:1.5,extensionAfterLength:3,extensionSecondsPerLetter:.75}});
+  for(const letter of 'CATCH')game.select(letter,0);
+  near(game.letterWindowSeconds,3);assert.equal(game.advance(2999),null);assert.equal(game.advance(3000).word,'CATCH');
+  for(const extensionAfterLength of [0,-1,1.5,NaN,Infinity])assert.throws(()=>createConfig({rules:{extensionAfterLength}}),/extensionAfterLength/);
+  for(const extensionSecondsPerLetter of [-1,NaN,Infinity])assert.throws(()=>createConfig({rules:{extensionSecondsPerLetter}}),/extensionSecondsPerLetter/);
+  const fixed=create({rules:{extensionSecondsPerLetter:0}});for(const letter of 'CATCH')fixed.select(letter,0);
+  near(fixed.letterWindowSeconds,2);
 });

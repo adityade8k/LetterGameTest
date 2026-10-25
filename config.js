@@ -16,7 +16,9 @@
   },
   "rules": {
     "minWordLength": 3,
-    "nextLetterSeconds": 4.5
+    "nextLetterSeconds": 2,
+    "extensionAfterLength": 4,
+    "extensionSecondsPerLetter": 0.5
   },
   "combo": {
     "enabled": true,
@@ -45,11 +47,16 @@
   "bonusLetters": {
     "chance": 0.16,
     "timeMultiplier": 2,
+    "scoreMultiplier": 2,
     "color": "#efcf79",
     "borderColor": "#b89a45"
   },
   "specialTiles": {
-    "warmupSeconds": 20
+    "warmupSeconds": 20,
+    "goldUnlockWords": 3,
+    "iceUnlockWords": 6,
+    "smokeUnlockWords": 10,
+    "fireUnlockWords": 12
   },
   "hourglass": {
     "enabled": true,
@@ -59,13 +66,18 @@
     "maxWordsBetweenDrops": 5,
     "speedMultiplier": 1.8,
     "rotationDegreesPerSecond": 56,
-    "durationSeconds": 5,
+    "durationSeconds": 7.5,
     "timeScale": 0.4,
     "color": "#bce2d6"
   },
   "letterEffects": {
     "purpleChance": 0.15,
-    "blueChance": 0.03
+    "blueChance": 0.03,
+    "redChance": 0.03
+  },
+  "fire": {
+    "durationSeconds": 5,
+    "timeScale": 2
   },
   "smoke": {
     "durationSeconds": 5,
@@ -81,7 +93,7 @@
   },
   "penalties": {
     "clearWordSeconds": 2,
-    "repeatWordSeconds": 2,
+    "repeatWordSeconds": 0,
     "invalidWordSeconds": 5
   },
   "falling": {
@@ -244,9 +256,16 @@
     if (config.opening.maxHeightFraction > 1) throw new Error('config.js: opening.maxHeightFraction must be at most 1.');
     number('bonusLetters', 'chance');
     number('bonusLetters', 'timeMultiplier', 1);
-    for (const key of ['purpleChance','blueChance']) number('letterEffects',key);
-    if (config.letterEffects.purpleChance+config.letterEffects.blueChance>1) throw new Error('config.js: letterEffects chances must total at most 1.');
+    number('bonusLetters', 'scoreMultiplier', 1, true);
+    for (const key of ['purpleChance','blueChance','redChance']) number('letterEffects',key);
+    const effectChance = config.letterEffects.purpleChance+config.letterEffects.blueChance+config.letterEffects.redChance;
+    if (effectChance>1) throw new Error('config.js: letterEffects chances must total at most 1.');
+    if (effectChance+config.bonusLetters.chance>1) throw new Error('config.js: letterEffects and bonusLetters chances must total at most 1.');
     number('specialTiles', 'warmupSeconds');
+    for (const key of ['iceUnlockWords','goldUnlockWords','smokeUnlockWords','fireUnlockWords']) {
+      if (!Number.isInteger(config.specialTiles[key]) || config.specialTiles[key] < 1) throw new Error(`config.js: specialTiles.${key} must be a positive integer.`);
+    }
+    if (config.specialTiles.iceUnlockWords <= config.specialTiles.goldUnlockWords || config.specialTiles.smokeUnlockWords <= config.specialTiles.iceUnlockWords || config.specialTiles.fireUnlockWords <= config.specialTiles.smokeUnlockWords) throw new Error('config.js: specialTiles unlocks must progress from gold to ice to smoke to fire.');
     if (!Number.isInteger(config.hourglass.minWordLength) || config.hourglass.minWordLength < 1) throw new Error('config.js: hourglass.minWordLength must be a positive integer.');
     number('hourglass', 'spawnChance');
     if (config.hourglass.spawnChance > 1) throw new Error('config.js: hourglass.spawnChance must be between 0 and 1.');
@@ -257,6 +276,8 @@
     number('hourglass', 'speedMultiplier', 1, true);
     number('hourglass', 'durationSeconds', 0, true);
     number('hourglass', 'timeScale', 0, true);
+    number('fire', 'durationSeconds', 0, true);
+    number('fire', 'timeScale', 1, true);
     number('smoke', 'durationSeconds', 0, true);
     number('hourglass', 'rotationDegreesPerSecond', 0, true);
     number('smoke', 'radiusFraction', 0, true);
@@ -316,6 +337,8 @@
     number('feedback', 'durationSeconds');
     for (const key of Object.keys(defaults.engagement)) number('engagement', key, 0, true);
     number('rules', 'nextLetterSeconds', 0, true);
+    number('rules', 'extensionSecondsPerLetter');
+    if (!Number.isInteger(config.rules.extensionAfterLength) || config.rules.extensionAfterLength < 1) throw new Error('config.js: rules.extensionAfterLength must be a positive integer.');
     if (typeof config.combo.enabled !== 'boolean') throw new Error('config.js: combo.enabled must be true or false.');
     if (!Number.isInteger(config.combo.wordsToStart) || config.combo.wordsToStart < 1) throw new Error('config.js: combo.wordsToStart must be a positive integer.');
     number('combo', 'maxGapSeconds', 0, true);

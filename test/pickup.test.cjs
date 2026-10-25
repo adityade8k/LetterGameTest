@@ -2,54 +2,124 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {WordGame}=require('../engine.js');
 const {createConfig}=require('../config.js');
-const make=()=>{const game=new WordGame(['CAT','CATS','DOG','SUN','SMILE','STARE']);game.start(0);return game;};
+const words=['CAT','CATS','DOG','SUN','SMILE','STARE','RAT','RATS','HAT','HATS','MAT','MATS','HEN','HENS','TEN','TENS','NET','NETS','PET','PETS','PEN','PENS','COT'];
+const make=()=>{const game=new WordGame(words);game.start(0);return game;};
+const scoreTo=(game,count)=>{while(game.wordCount<count){for(const letter of words[game.wordCount])game.select(letter,0);assert.equal(game.submit(0).type,'word');}};
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} versus ${b}`);
 
-test('letter traits have exclusive 15% smoke and 3% slow-time chances independent of gold',()=>{
- const game=make(),counts={smoke:0,hourglass:0,normal:0};
+test('unlocked letters have exclusive 15% smoke, 3% ice, 16% gold and 3% fire chances',()=>{
+ const game=make(),counts={smoke:0,hourglass:0,gold:0,fire:0,normal:0};
+ scoreTo(game,12);
+ for(let i=0;i<4;i++)game.rollTileTraits(()=>.99); // Guaranteed introductions precede random drops.
  for(let i=0;i<10000;i++){
-   let draw=0;const traits=game.rollTileTraits(()=>draw++===0?.5:(i+.5)/10000);
-   counts[traits.effect||'normal']++;assert.equal(traits.grenade,false);assert.equal(traits.bonus,false);
+   const traits=game.rollTileTraits(()=>(i+.5)/10000);
+   counts[traits.effect||(traits.bonus?'gold':'normal')]++;assert.equal(traits.grenade,false);assert.ok(!(traits.bonus&&traits.effect));
  }
- assert.deepEqual(counts,{smoke:1500,hourglass:300,normal:8200});
- for(const roll of [.01,.1,.9]){
-   let draw=0;assert.equal(game.rollTileTraits(()=>draw++===0?0:roll).bonus,true);
- }
+ assert.deepEqual(counts,{smoke:1500,hourglass:300,gold:1600,fire:300,normal:6300});
  for(const letterEffects of [{purpleChance:-.1},{blueChance:-.1},{purpleChance:.99,blueChance:.03}])assert.throws(()=>createConfig({letterEffects}),/letterEffects/);
+ assert.throws(()=>createConfig({bonusLetters:{chance:.9}}),/chances must total/);
+});
+
+test('gold, ice, smoke and fire first appear at three, six, ten and twelve scored words',()=>{
+ const game=make(),neutral={bonus:false,grenade:false,effect:null};
+ assert.deepEqual([game.config.specialTiles.goldUnlockWords,game.config.specialTiles.iceUnlockWords,game.config.specialTiles.smokeUnlockWords,game.config.specialTiles.fireUnlockWords],[3,6,10,12]);
+ for(let count=0;count<3;count++){
+   scoreTo(game,count);
+   for(const roll of [0,.02,.1,.2,.99])assert.deepEqual(game.rollTileTraits(()=>roll),neutral);
+ }
+ scoreTo(game,3);assert.deepEqual(game.rollTileTraits(()=>.99),{bonus:true,grenade:false,effect:null});
+ for(let count=3;count<6;count++){
+   scoreTo(game,count);
+   for(const roll of [0,.02,.1,.2,.99])assert.equal(game.rollTileTraits(()=>roll).effect,null);
+ }
+ scoreTo(game,6);assert.deepEqual(game.rollTileTraits(()=>.99),{bonus:false,grenade:false,effect:'hourglass'});
+ for(let count=6;count<10;count++){
+   scoreTo(game,count);
+   for(const roll of [0,.02,.1,.2,.99])assert.notEqual(game.rollTileTraits(()=>roll).effect,'smoke');
+ }
+ scoreTo(game,10);assert.deepEqual(game.rollTileTraits(()=>.99),{bonus:false,grenade:false,effect:'smoke'});
+ for(let count=10;count<12;count++){
+   scoreTo(game,count);
+   for(const roll of [0,.02,.1,.2,.35,.99])assert.notEqual(game.rollTileTraits(()=>roll).effect,'fire');
+ }
+ scoreTo(game,12);assert.deepEqual(game.rollTileTraits(()=>.99),{bonus:false,grenade:false,effect:'fire'});
+ assert.deepEqual(game.rollTileTraits(()=>.99),neutral);
+});
+
+test('fast scoring preserves introduction order and a new round restarts the milestones',()=>{
+ const game=make();scoreTo(game,12);
+ assert.deepEqual(Array.from({length:4},()=>{const traits=game.rollTileTraits(()=>.99);return traits.effect||(traits.bonus?'gold':null);}),['gold','hourglass','smoke','fire']);
+ assert.deepEqual(game.specialIntroductions,{hourglass:true,gold:true,smoke:true,fire:true});
+ game.start(10000);assert.deepEqual(game.specialIntroductions,{hourglass:false,gold:false,smoke:false,fire:false});
+ assert.deepEqual(game.rollTileTraits(()=>0),{bonus:false,grenade:false,effect:null});
+ scoreTo(game,3);assert.deepEqual(game.rollTileTraits(()=>.99),{bonus:true,grenade:false,effect:null});
+});
+
+test('only accepted words advance introductions; pause cannot consume a guaranteed tile',()=>{
+ const game=make();scoreTo(game,2);
+ for(const letter of 'CAT')game.select(letter,0);assert.equal(game.submit(0).reason,'repeat');
+ game.select('Z',0);game.select('C',0);game.undo(0);
+ assert.equal(game.wordCount,2);assert.deepEqual(game.rollTileTraits(()=>0),{bonus:false,grenade:false,effect:null});
+ scoreTo(game,3);game.pause(0);
+ assert.deepEqual(game.rollTileTraits(()=>0),{bonus:false,grenade:false,effect:null});assert.equal(game.specialIntroductions.gold,false);
+ game.resume(0);assert.equal(game.rollTileTraits(()=>.99).bonus,true);
+});
+
+test('special progression milestones are ordered, configurable positive word counts',()=>{
+ for(const specialTiles of [{goldUnlockWords:0},{iceUnlockWords:1.5},{goldUnlockWords:6},{iceUnlockWords:3},{smokeUnlockWords:6},{smokeUnlockWords:Infinity},{fireUnlockWords:10},{fireUnlockWords:0},{fireUnlockWords:12.5}])assert.throws(()=>createConfig({specialTiles}),/specialTiles/);
+ const game=new WordGame(words,{specialTiles:{goldUnlockWords:1,iceUnlockWords:2,smokeUnlockWords:3,fireUnlockWords:4}});game.start(0);
+ for(const [i,effect] of ['gold','hourglass','smoke','fire'].entries()){
+   scoreTo(game,i+1);const traits=game.rollTileTraits(()=>.99);assert.equal(traits.effect||(traits.bonus?'gold':null),effect);
+ }
 });
 
 test('selecting a colored letter adds the letter and triggers only its own effect immediately',()=>{
- for(const effect of ['smoke','hourglass']){
+ for(const effect of ['smoke','hourglass','fire']){
    const game=make(),result=game.select('C',0,{effect,bonus:true});
-   assert.equal(result.type,'letter');assert.deepEqual(result.tileEffect,{effect,duration:5});
-   assert.equal(game.current,'C');assert.equal(game.currentTiles[0].effect,effect);assert.equal(game.currentTiles[0].bonus,true);
-   assert.equal(game.effects[effect],5);assert.equal(game.effects[effect==='smoke'?'hourglass':'smoke'],0);
+   const duration=effect==='hourglass'?7.5:5;
+   assert.equal(result.type,'letter');assert.deepEqual(result.tileEffect,{effect,duration});
+   assert.equal(game.current,'C');assert.equal(game.currentTiles[0].effect,effect);assert.equal(game.currentTiles[0].bonus,false);assert.equal(result.goldCollected,undefined);
+   assert.equal(game.effects[effect],duration);assert.equal(game.effects[effect==='smoke'?'hourglass':'smoke'],0);
    game.select('A',0);game.select('T',0);const word=game.submit(0);
    assert.equal(word.points,5);assert.equal(word.selectedTiles[0].effect,effect);assert.equal(word.hourglassOffered,false);
  }
 });
 
+test('gold collection feedback fires for a consumed tile and does not leak through rejected inputs',()=>{
+ const game=make();assert.equal(game.select('C',0,{bonus:true}).goldCollected,true);assert.equal(game.hasBonus,true);
+ const blank=make();assert.equal(blank.select('?',0,{bonus:true}).goldCollected,undefined);assert.equal(blank.hasBonus,false);
+ const paused=make();paused.pause(0);assert.equal(paused.select('C',0,{bonus:true}).goldCollected,undefined);
+ const invalid=make();assert.equal(invalid.select('!',0,{bonus:true}).goldCollected,undefined);
+ for(const pending of ['CAT','CA']){
+   const late=make();for(const letter of pending)late.select(letter,0);
+   const result=late.select('C',4500,{bonus:true});assert.equal(result.consumed,false);assert.equal(result.goldCollected,undefined);assert.equal(late.hasBonus,false);
+ }
+ const expired=make();assert.equal(expired.select('C',61000,{bonus:true}).goldCollected,undefined);
+ const ending=make();ending.remaining=1;const result=ending.select('Z',0,{bonus:true});assert.equal(result.ended,true);assert.equal(result.goldCollected,undefined);
+});
+
 test('blue letters slow both clocks; purple smoke can coexist, refresh, pause and reset',()=>{
  const game=make();game.select('C',0,{effect:'hourglass'});game.advance(1000);
- near(game.remaining,59.6);near(game.letterSeconds,4.1);
- game.select('A',1000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,4);
- game.select('T',2000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,3);
- game.pause(2000);game.advance(100000);near(game.effects.smoke,5);near(game.effects.hourglass,3);
- game.resume(100000);game.advance(103000);near(game.effects.hourglass,0);near(game.effects.smoke,2);
- game.start(200000);assert.deepEqual(game.effects,{hourglass:0,smoke:0});
+ near(game.remaining,59.6);near(game.letterSeconds,1.6);
+ game.select('A',1000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,6.5);
+ game.select('T',2000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,5.5);
+ game.pause(2000);game.advance(100000);near(game.effects.smoke,5);near(game.effects.hourglass,5.5);
+ game.resume(100000);game.advance(103000);near(game.effects.hourglass,2.5);near(game.effects.smoke,2);
+ game.advance(105500);near(game.effects.hourglass,0);near(game.effects.smoke,0);
+ game.start(200000);assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:0});
 });
 
 test('blanks and legacy grenade flags never trigger letter effects',()=>{
- for(const options of [{effect:'smoke',blank:true},{effect:'hourglass',blank:true},{grenade:true},{effect:'invalid'}]){
+ for(const options of [{effect:'smoke',blank:true},{effect:'hourglass',blank:true},{effect:'fire',blank:true},{grenade:true},{effect:'invalid'}]){
    const game=make(),result=game.select('C',0,options);
-   assert.equal(result.tileEffect,undefined);assert.deepEqual(game.effects,{hourglass:0,smoke:0});
+   assert.equal(result.tileEffect,undefined);assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:0});
  }
 });
 
 test('paused, invalid input and late selection do not consume or activate a colored tile',()=>{
- for(const effect of ['hourglass','smoke']){
+ for(const effect of ['hourglass','smoke','fire']){
    const paused=make();paused.pause(0);assert.equal(paused.select('C',1000,{effect}).type,'ignored');
-   assert.deepEqual(paused.effects,{hourglass:0,smoke:0});
+   assert.deepEqual(paused.effects,{hourglass:0,smoke:0,fire:0});
    const invalid=make();assert.equal(invalid.select('!',0,{effect}).type,'ignored');assert.equal(invalid.effects[effect],0);
    for(const word of ['CAT','CA']){
      const game=make();for(const letter of word)game.select(letter,0);

@@ -39,7 +39,7 @@ test('new words earn full letter points with length-based time and can enter ove
   assert.equal(game.score, 22);
   assert.equal(game.wordCount, 3);
 });
-test('repeat submissions lose time without adding another point', () => {
+test('repeat submissions add neither points nor a time penalty', () => {
   const game = create({timer:{maxSeconds:120}});
   spell(game, 'CAT'); game.submit(0);
   spell(game, 'CAT', 1000);
@@ -47,10 +47,12 @@ test('repeat submissions lose time without adding another point', () => {
   assert.equal(game.isRepeat, true);
   const result = game.submit(1000);
   assert.equal(result.reason, 'repeat');
-  assert.equal(result.penalty, 2);
+  assert.equal(result.type, 'repeat');
+  assert.equal(result.points, 0);
+  assert.equal(result.penalty, 0);
   assert.equal(game.score, 5);
   assert.equal(game.wordCount, 1);
-  assert.equal(game.remaining, 57.5);
+  assert.equal(game.remaining, 59.5);
 });
 test('a used word can be extended into a new word', () => {
   const game = create();
@@ -148,15 +150,15 @@ test('empty undo is harmless and cannot repeatedly charge a player', () => {
   spell(game, 'CAT'); game.undo(0); game.undo(0);
   assert.equal(game.remaining, 58);
 });
-test('clear and repeat penalties can end a round without reducing earned points', () => {
+test('clear can end a round, while a repeat at low time remains neutral', () => {
   for (const action of ['undo', 'submit']) {
     const game = create();
     spell(game, 'CAT'); game.submit(0);
     spell(game, 'CAT', 59000);
     const result = game[action](59000);
-    assert.equal(result.ended, true);
-    assert.equal(game.remaining, 0);
-    assert.equal(game.phase, 'over');
+    assert.equal(game.remaining, action === 'undo' ? 0 : 1);
+    assert.equal(game.phase, action === 'undo' ? 'over' : 'running');
+    assert.equal(result.type, action === 'undo' ? 'penalty' : 'repeat');
     assert.equal(game.current, '');
     assert.equal(game.score, 5);
   }
@@ -173,10 +175,10 @@ test('custom timer, reward rate, penalties, and letter values drive the rules', 
   assert.equal(result.points, 6);
   assert.equal(result.reward, 3);
   assert.equal(game.remaining, 48);
-  spell(game, 'CAT'); assert.equal(game.submit(0).penalty, 3);
+  spell(game, 'CAT'); assert.equal(game.submit(0).penalty, 0);
   spell(game, 'CA'); assert.equal(game.undo(0).penalty, 1.25);
   assert.equal(spell(game, 'QZ').penalty, 4);
-  assert.equal(game.remaining, 39.75);
+  assert.equal(game.remaining, 42.75);
   assert.equal(game.score, 6);
 });
 test('configurable minimum word length applies to validation', () => {

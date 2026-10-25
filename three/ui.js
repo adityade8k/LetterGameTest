@@ -18,28 +18,40 @@ export function createUI(font, config, reducedMotion=false) {
     paper: celMaterial(['#ffefd3', '#e0b69e']),
     muted: celMaterial(['#ac7e78', '#926770']),
     pale: celMaterial(['#e9c5a8', '#d7a78e']),
-    primary: celMaterial(['#70445f', '#55364e']),
-    primaryHover: celMaterial(['#85546f', '#64415b']),
+    primary: celMaterial(['#efbf65', '#d99a3d']),
+    primaryHover: celMaterial(['#f8cf7a', '#e8ad4c']),
     lightText: celMaterial(['#ffefd3', '#e4c49e']),
     edge: celMaterial(['#c19b8b', '#957184']),
-    primaryEdge: celMaterial(['#50344d', '#3e2940']),
+    primaryEdge: celMaterial(['#b67c35', '#8b592b']),
     danger: celMaterial(['#bb545c', '#8d4355']),
+    buttonShine: celMaterial(['#fff4db', '#f7dfba']),
+    primaryShine: celMaterial(['#ffe2a1', '#f6ca73']),
+    iconShade: celMaterial(['#352637', '#2e2033']),
+    goldInk: celMaterial(palette.goldInk || ['#604021','#493017']),
+    goldLight: celMaterial(palette.goldHighlight || ['#fff0b0','#ffe08a']),
+    ice: celMaterial(palette.ice || ['#d5f0fb','#79b7dd']),
+    iceInk: celMaterial(palette.iceInk || ['#214d73','#173654']),
+    fire: celMaterial(palette.fire || ['#ffe329','#f5861f']),
+    fireInk: celMaterial(palette.fireInk || ['#4b211c','#361b17']),
+    smoke: celMaterial(palette.smokeTile || ['#d85e9f','#a83d7c']),
+    smokeInk: celMaterial(palette.smokeInk || ['#fff0df','#ffe4cc']),
   };
   const geometryCache = new Map(), glyphCache = new Map(), slots = new Map();
   const controls = [];
   const point = (x, y, z = 0) => new THREE.Vector3(x - 180, 320 - y, z);
   const fmt = n => String(Number(n.toFixed(2)));
+  const {nextLetterSeconds,extensionAfterLength,extensionSecondsPerLetter}=config.rules;
+  const letterTimingCopy=extensionSecondsPerLetter>0?`First ${extensionAfterLength} letters: ${fmt(nextLetterSeconds)}s each. Letter ${extensionAfterLength+1}: ${fmt(nextLetterSeconds+extensionSecondsPerLetter)}s; letter ${extensionAfterLength+2}: ${fmt(nextLetterSeconds+extensionSecondsPerLetter*2)}s. Then +${fmt(extensionSecondsPerLetter)}s per letter.`:`Each letter gives ${fmt(nextLetterSeconds)} seconds.`;
   // Guard presentation-only timings without changing any game clock.
   const presentationSeconds=(value,fallback)=>Number.isFinite(value)&&value>0?Math.max(.05,Math.min(2,value)):fallback;
   const successSeconds=presentationSeconds(config.engagement?.successSeconds,.28);
   const discoverySeconds=presentationSeconds(config.engagement?.discoverySeconds,.6);
   let phase = 'ready', mode = '', focus = '', hover = '', lastPress = '', pressUntil = 0;
   let collectionPage = 0, collectionPages = 1, bookPages = 1;
-  let latestView={}, settleAge=Infinity, resolvedWord='', resolvedLetters=[], latestRecentRoot=null, sessionNewWords=new Set();
   const meters=new RewardMeters(config.celebration),celebrations=[];
   const scoreLedger=new ScoreFlights({durationSeconds:config.engagement?.scoreFlightSeconds}),scoreFlights=[];
-  let scoreSettleAge=Infinity;
-  let lastBest=0,currentLayout=null,effectsVisible=false;
+  let scoreSettleAge=Infinity,goldCelebration=null;
+  let currentLayout=null,effectsVisible=false;
 
   function group(parent = scene, x = 0, y = 0, z = 0) {
     const object = new THREE.Group();
@@ -47,7 +59,7 @@ export function createUI(font, config, reducedMotion=false) {
     parent.add(object); return object;
   }
   // Root groups use screen coordinates; children use local offsets.
-  const hud = group(scene), intro = group(scene), playing = group(scene), modal = group(scene),status=group(scene);
+  const hud = group(scene), homeHud = group(scene), intro = group(scene), playing = group(scene), modal = group(scene),status=group(scene);
   // group(scene) puts its origin at the top left of the 360 x 640 camera.
   function rectGeometry(w, h, radius = 8, depth = 2) {
     const key = `${w}:${h}:${radius}:${depth}`;
@@ -80,7 +92,7 @@ export function createUI(font, config, reducedMotion=false) {
   function text(parent,value,x,y,{size=8,align='left',material='ink',maxWidth=Infinity,spacing=0,raised=false,z=6,colors}={}) {
     const content=String(value), originalWidth=Math.max(0,measure(content,size,spacing));
     const scale=Math.min(1,maxWidth/Math.max(1,originalWidth));
-    const g=new THREE.Group();g.position.set(x-(align==='center'?originalWidth*scale/2:align==='right'?originalWidth*scale:0),-y-size*scale,z);g.scale.setScalar(scale);parent.add(g);
+    const g=new THREE.Group();g.userData.uiText=content;g.position.set(x-(align==='center'?originalWidth*scale/2:align==='right'?originalWidth*scale:0),-y-size*scale,z);g.scale.setScalar(scale);parent.add(g);
     let cursor=0;
     [...content].forEach((char,i)=>{
       if(char!==' '){const mesh=new THREE.Mesh(glyph(char,size,raised),materials[colors?.[i]||material]);mesh.position.x=cursor;g.add(mesh);}
@@ -109,7 +121,7 @@ export function createUI(font, config, reducedMotion=false) {
     const g=new THREE.Group();parent.add(g);build(g);slots.set(key,{signature,group:g});return g;
   }
   function icon(parent,kind,x,y,{scale=1,material='ink',accent,z=6}={}) {
-    const g=createIcon(kind,materials[material],accent?materials[accent]:['hourglass','grenade'].includes(kind)?materials.gold:materials[material]);
+    const g=createIcon(kind,materials[material],accent?materials[accent]:materials[material]);
     g.position.set(x,-y,z);g.scale.setScalar(scale);parent.add(g);return g;
   }
   const shadowMaterial=new THREE.ShaderMaterial({
@@ -132,21 +144,24 @@ export function createUI(font, config, reducedMotion=false) {
   }
   function plinth(parent,x,y,w,h,r=14){
     dropShadow(parent,x,y,w,h,r);
-    panel(parent,x+1,y+4,w,h,'edge',r,-3,3);
-    return panel(parent,x,y,w,h,'paper',r,-1,3);
+    panel(parent,x+1,y+4,w,h,'edge',r,-5,3);
+    return panel(parent,x,y,w,h,'paper',r,-3,3);
   }
-  function button(parent,id,label,x,y,w,h,{primary=false,quiet=false,iconName,small=false}={}) {
-    const root=group(parent,x,y,1);
-    if(!quiet){dropShadow(root,0,1,w,h,primary?11:8,-4);panel(root,0,3,w,h,primary?'primaryEdge':'edge',primary?11:8,-2,2);}
-    const body=panel(root,0,0,w,h,primary?'primary':quiet?'cream':'paper',primary?11:8,0,primary?4:2);
-    // Quiet actions still have actual mesh hit surfaces; they are never DOM targets.
-    if(quiet){body.material=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false});}
-    const c={id,label,root,body,enabled:true,primary,quiet,w,h,layoutY:y};controls.push(c);
+  function button(parent,id,label,x,y,w,h,{primary=false,quiet=false,iconName,small=false,round=false,gold=false,centered=false}={}) {
+    const root=group(parent,x,y,1),radius=round?Math.min(w,h)/2:primary?18:12;
+    // A fixed foot and shadow make the moving cap read as a real little key.
+    if(!quiet){dropShadow(root,0,2,w,h,radius,-5);panel(root,0,4,w,h,primary||gold?'primaryEdge':'edge',radius,-3,3);}
+    const face=group(root);
+    const body=panel(face,0,0,w,h,primary?'primary':gold?'gold':quiet?'cream':'paper',radius,0,primary?4:2);
+    if(quiet)body.material=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false});
+
+    const c={id,label,root,face,body,enabled:true,primary,quiet,gold,w,h,layoutY:y};controls.push(c);
     body.userData.control=c;
-    if(label)text(root,label,primary?17:w/2,(h-(small?7.5:primary?12:9))/2-1,{size:small?7.5:primary?12:9,align:primary?'left':'center',material:primary?'lightText':'ink',maxWidth:w-(primary?55:12),z:5});
-    if(primary)icon(root,'arrow',w-22,h/2,{material:'lightText',scale:.8,z:5});
-    if(iconName)icon(root,iconName,w/2,h/2,{z:5});
-    const marker=panel(root,w/2-6,h+3,12,2,'gold',1,2,.5);marker.visible=false;c.marker=marker;
+    const labelSize=centered?24:small?7.5:primary?(h>=50?16:12):9;
+    if(label)text(face,label,centered?w/2:primary?19:w/2,(h-labelSize)/2-1,{size:labelSize,align:centered?'center':primary?'left':'center',material:primary||gold?'goldInk':'ink',maxWidth:w-(centered?28:primary?59:12),raised:centered,z:5});
+    if(primary&&!centered)icon(face,/^Back/.test(label)?'back':'play',w-25,h/2,{material:'goldInk',scale:.8,z:5});
+    if(iconName)icon(face,iconName,w/2,h/2,{z:5});
+    const marker=panel(root,w/2-6,h+4,12,2,'gold',1,2,.5);marker.visible=false;c.marker=marker;
     return c;
   }
   function isWithin(object,parent){for(let o=object;o;o=o.parent)if(o===parent)return true;return false;}
@@ -154,45 +169,57 @@ export function createUI(font, config, reducedMotion=false) {
   function enabledControls(){
     return controls.filter(c=>c.enabled&&ancestorsVisible(c.root)&&(mode?isWithin(c.root,modal):!isWithin(c.root,modal)));
   }
-  function setEnabled(c,enabled){c.enabled=enabled;c.body.material=materials[enabled?(c.primary?'primary':'paper'):'pale'];}
+  function setEnabled(c,enabled){c.enabled=enabled;c.body.material=materials[enabled?(c.primary?'primary':c.gold?'gold':'paper'):'pale'];}
 
-  // Raised header first, then a recessed clock channel, then the falling field.
-  plinth(hud,12,10,336,99,15);
-  text(hud,'CLTTR',22,24,{size:27,spacing:-.8,maxWidth:165,raised:true});
-  text(hud,'POINTS',244,25,{size:5.5,align:'right',spacing:.6});
-  text(hud,'BEST',291,25,{size:5.5,align:'right',spacing:.6});
-  const pause=button(hud,'pause','',307,19,34,36,{iconName:'pause'});
+  // A few tactile objects float over the playfield, leaving room for letters.
+  const scoreShell=group(hud,18,10);
+  dropShadow(scoreShell,0,0,132,32,16);
+  panel(scoreShell,0,3,132,32,'edge',16,-2,2);
+  panel(scoreShell,0,0,132,32,'paper',16,0,3);
+  icon(scoreShell,'coin',19,16,{material:'gold',accent:'goldInk',scale:.85,z:5});
+  const scoreAnchor=group(hud,137,13);
+  const pause=button(hud,'pause','',298,6,44,44,{iconName:'pause',round:true});
   pause.label='Pause game';
-  panel(hud,22,83,316,12,'edge',6,2,.5);
-  panel(hud,24,84,312,8,'pale',4,3,.5);
-  const timer=panel(hud,25,85,310,6,'ink',3,4,.6);
-  const overtime=panel(hud,25,85,310,6,'gold',3,5.4,.4);
+  panel(hud,18,49,324,3,'edge',1.5,2,.4);
+  const timer=panel(hud,19,49.5,322,2,'ink',1,4,.4);
+  timer.userData.roundTimeBar=true;
+  const overtime=panel(hud,19,49.5,322,2,'gold',1,5.4,.4);
   overtime.visible=false;
-  const recharge=panel(hud,25,84,310,8,'mint',3,6.5,.4);
+  const recharge=panel(hud,19,49,322,3,'mint',1.5,6.5,.4);
   recharge.material=materials.mint.clone();recharge.material.transparent=true;recharge.material.depthWrite=false;recharge.visible=false;
-  const scoreAnchor=group(hud,244,39),clockAnchor=group(hud,338,65);
 
-  plinth(intro,12,320,336,305,16);
-  text(intro,'MAKE SOMETHING OF THE FALL.',180,337,{size:6.5,align:'center',spacing:.45});
-  text(intro,'A little word wonder.',180,359,{size:24,align:'center',maxWidth:308,raised:true});
-  text(intro,'Catch letters. Discover your next word.',180,397,{size:8.4,align:'center',maxWidth:300,material:'muted'});
-  button(intro,'start',"Let's play",26,424,308,46,{primary:true});
-  const homeBook=button(intro,'wordbook','',26,485,146,36);
-  button(intro,'stats','Your progress',188,485,146,36);
-  button(intro,'help','How to play',26,534,146,36);
-  button(intro,'settings','Settings',188,534,146,36);
-  const homeGoal=button(intro,'goals','',26,583,308,28,{quiet:true});
+  const settingsButton=button(homeHud,'settings','',298,8,44,44,{iconName:'gear',round:true});
+  settingsButton.label='Settings';
+  const brandTiles=[];
+  [...'CLTTR'].forEach((letter,i)=>{
+    const tile=group(intro,57+i*61,191,4),angle=[-.09,.055,-.04,.075,-.055][i];
+    tile.rotation.z=angle;tile.userData.brandTile=true;
+    dropShadow(tile,-26,-31,52,62,12);
+    panel(tile,-26,-27,52,62,i===2?'primaryEdge':'edge',12,-3,4);
+    panel(tile,-26,-31,52,62,i===2?'primary':'paper',12,0,5);
+    text(tile,letter,0,-18,{size:35,align:'center',material:i===2?'goldInk':'ink',raised:true,z:7});
+    brandTiles.push({tile,angle,index:i});
+  });
+  text(intro,'Catch letters.',180,257,{size:13,align:'center'});
+  text(intro,'Discover your next word.',180,279,{size:9.5,align:'center',material:'muted'});
+  const start=button(intro,'start',"Let's Play",70,334,220,76,{primary:true,centered:true});
+  const homeBook=button(intro,'wordbook','',42,425,132,62);
+  icon(homeBook.face,'book',66,19,{scale:.7,material:'ink',accent:'iconShade'});
+  text(homeBook.face,'Word Book',66,39,{size:9,align:'center'});homeBook.label='Word Book';
+  const homeProgress=button(intro,'stats','',186,425,132,62);
+  icon(homeProgress.face,'progress',66,19,{scale:.75,material:'ink'});
+  text(homeProgress.face,'Your Progress',66,39,{size:8.5,align:'center'});
+  homeProgress.label='Your Progress';
+  const help=button(intro,'help','How to Play',79,508,202,42);
+  help.label='How to Play';
 
-  plinth(playing,12,470,336,151,15);
-  text(playing,'YOUR WORD',22,480,{size:6.7,spacing:.5});
-  const submit=button(playing,'submit','',76,498,262,46);
-  icon(submit.root,'paperPlane',239,22,{material:'ink',accent:'paper',scale:.8,z:5});
-  const undo=button(playing,'undo','',22,498,46,46);
-  icon(undo.root,'trash',23,15,{material:'ink',accent:'paper',scale:.78,z:5});text(undo.root,`-${fmt(config.penalties.clearWordSeconds)}s`,23,29,{size:6.7,align:'center',material:'muted',z:5});
-  const letterTimer=panel(submit.root,13,41,230,2,'ink',1,7,.25);
+  plinth(playing,12,544,336,76,16);
+  const submit=button(playing,'submit','',76,554,262,54);
+  icon(submit.face,'paperPlane',237,27,{material:'ink',accent:'iconShade',scale:1.15,z:5});
+  const undo=button(playing,'undo','',22,559,46,44);
+  icon(undo.face,'trash',23,22,{material:'ink',accent:'iconShade',scale:.84,z:5});
+  const letterTimer=panel(submit.face,13,46,230,3,'ink',1.5,7,.25);
   letterTimer.visible=false;
-  text(playing,'WORDS COLLECTED',22,561,{size:6.7,spacing:.5});
-  const collection=button(playing,'collection','',20,553,320,49,{quiet:true});collection.label='View collected words';
 
   // Time remains beside the clock. Point badges travel from the submitted word
   // to the score without adding hit targets or stopping the next selection.
@@ -216,9 +243,40 @@ export function createUI(font, config, reducedMotion=false) {
     for(const item of scoreFlights)removeCelebration(item);
     scoreFlights.length=0;scoreLedger.reset();scoreSettleAge=Infinity;scoreAnchor.scale.setScalar(1);
   }
+  function clearGoldCelebration(){
+    if(goldCelebration)removeCelebration(goldCelebration);
+    goldCelebration=null;
+  }
+  function celebrateGold(){
+    clearGoldCelebration();
+    const root=group(rewardLayer,180,139,20),badge=group(root);
+    root.userData.goldCelebration=true;
+    panel(badge,-106,-21,212,42,'goldInk',14,-2,2);
+    panel(badge,-104,-23,208,40,'gold',13,1,3);
+    panel(badge,-92,-21,184,2,'goldLight',1,5,.3);
+    text(badge,'Double Score!',0,-10,{size:18,align:'center',material:'goldInk',raised:true,z:6,maxWidth:183});
+    const sparkles=[];
+    for(const [x,y] of [[-120,-20],[119,-16],[-113,25],[112,23]]){
+      const star=group(badge,x,y,5);
+      panel(star,-1,-5,2,10,'goldLight',1,0,.4);panel(star,-5,-1,10,2,'goldLight',1,0,.4);
+      sparkles.push(star);
+    }
+    goldCelebration={root,badge,sparkles,materials:fadeMaterials(root),age:0};
+    animateGoldCelebration();
+  }
+  function animateGoldCelebration(){
+    if(!goldCelebration)return;
+    const item=goldCelebration,t=clamp01(item.age/.3),v=t-1;
+    const pop=1+2.7*v*v*v+1.7*v*v;
+    item.badge.scale.setScalar(reducedMotion?1:.65+.35*pop);
+    item.badge.rotation.z=reducedMotion?0:Math.sin(item.age*13)*.045*Math.exp(-item.age*3);
+    item.root.position.y=-(139-(reducedMotion?0:5*easeOut(clamp01(item.age/1.6))));
+    item.sparkles.forEach((star,i)=>star.scale.setScalar(reducedMotion?1:.8+.22*Math.sin(item.age*10+i)));
+    setAlpha(item.materials,(reducedMotion?1:clamp01(item.age/.08))*(1-clamp01((item.age-1.2)/.4)));
+  }
   function flightOrigin(word){
-    const width=Math.min(205,measure(word||'',24));
-    return {x:Math.min(281,89+width/2),y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-(currentLayout?.top||0)-119};
+    const width=Math.min(184,measure(word||'',24));
+    return {x:Math.min(273,89+width/2),y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-(currentLayout?.top||0)-59};
   }
   function addScoreFlight(result){
     const flight=scoreLedger.add(result.points,{immediate:reducedMotion});if(!flight)return;
@@ -226,7 +284,7 @@ export function createUI(font, config, reducedMotion=false) {
     const label=`+${result.points}`,width=Math.max(32,measure(label,12)+17);
     panel(badge,-width/2,-12,width,24,'cream',12,0,1.5);
     text(badge,label,0,-6,{size:12,align:'center',material:'ink',raised:true,z:4});
-    const item={root,badge,materials:fadeMaterials(root),flight,word:result.word,from:flightOrigin(result.word),to:{x:232,y:47},lane:(flight.id%3)-1,reduced:reducedMotion};
+    const item={root,badge,materials:fadeMaterials(root),flight,word:result.word,from:flightOrigin(result.word),to:{x:112,y:26},lane:(flight.id%3)-1,reduced:reducedMotion};
     // These are diagnostic scene labels, never interactive control targets.
     root.userData.scoreFlight=flight;scoreFlights.push(item);animateScoreFlight(item);
   }
@@ -236,43 +294,44 @@ export function createUI(font, config, reducedMotion=false) {
     item.badge.position.set(pose.x,-pose.y,0);item.badge.scale.setScalar(pose.scale);setAlpha(item.materials,pose.alpha);
   }
   function celebrate(result,game){
+    if(result?.type!=='word'||!(result.points>0))return;
+    if(result.scoreMultiplier>1)celebrateGold();
     meters.add(result.reward,0);addScoreFlight(result);
-    settleAge=0;resolvedWord=result.word||'';resolvedLetters=result.blankIndices||result.wildcardIndices||[...(result.pattern||result.submittedPattern||'')].flatMap((letter,index)=>letter==='?'?[index]:[]);
-    if(result.isNew||result.isNewWord||result.isNewDiscovery||result.discovery?.isNew)sessionNewWords.add(result.word);
     // Time labels stay coalesced; point flights retain independent arrivals.
     for(const item of celebrations)removeCelebration(item);celebrations.length=0;
-    const root=group(rewardLayer),time=group(root,298,66,12);
+    const root=group(rewardLayer),time=group(root,280,25,12);
     text(time,result.reward>0?`+${fmt(result.reward)}s`:'MAX',0,0,{size:9,align:'right',material:'muted',maxWidth:42});
-    const timeMaterials=fadeMaterials(time);
-    const item={root,time,materials:timeMaterials,timeMaterials,age:0,result,startTime:meters.values(game.remaining,game.score).time};
+    const reveal=group(root,180,522,10);reveal.userData.resolvedWord=result.word;
+    const blanks=new Set(result.blankIndices||result.wildcardIndices||[...(result.pattern||result.submittedPattern||'')].flatMap((letter,index)=>letter==='?'?[index]:[]));
+    text(reveal,result.word||'',0,0,{size:12,align:'center',maxWidth:288,colors:[...(result.word||'')].map((_,i)=>blanks.has(i)?'goldInk':'ink'),raised:true});
+    const timeMaterials=fadeMaterials(time),revealMaterials=fadeMaterials(reveal);
+    const item={root,time,reveal,materials:[...timeMaterials,...revealMaterials],timeMaterials,revealMaterials,age:0,result,startTime:meters.values(game.remaining,game.score).time};
     celebrations.push(item);animateCelebration(item);
   }
   function animateCelebration(item){
     const {age,time}=item,duration=config.celebration.durationSeconds,t=clamp01(age/duration);
     const alpha=clamp01(t/.12)*(1-clamp01((t-.55)/.45));
     const rise=reducedMotion?0:2*easeOut(t);
-    time.position.y=-(66-rise);setAlpha(item.timeMaterials,alpha);
+    time.position.y=-(25-rise);setAlpha(item.timeMaterials,alpha);
+    item.reveal.visible=age<discoverySeconds;
+    item.reveal.position.y=-((currentLayout?.height||640)-(currentLayout?.bottom||0)-(currentLayout?.top||0)-118)+(reducedMotion?0:2*(1-easeOut(clamp01(age/successSeconds))));
+    setAlpha(item.revealMaterials,1-clamp01((age-discoverySeconds*.65)/(discoverySeconds*.35)));
   }
   function syncMeters(game){
     const shown={time:reducedMotion?game.remaining:meters.values(game.remaining,game.score).time,score:scoreLedger.value(game.score)},timeRatio=shown.time/config.timer.startSeconds;
     const extraCapacity=config.timer.maxSeconds-config.timer.startSeconds,inOvertime=shown.time>config.timer.startSeconds;
     timer.scale.x=Math.max(.001,Math.min(1,timeRatio));
-    timer.material=materials[game.effects.hourglass>0?'mint':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
+    timer.material=materials[game.effects.hourglass>0?'ice':game.effects.fire>0?'fire':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
     overtime.visible=inOvertime&&extraCapacity>0;
     overtime.scale.x=Math.max(.001,Math.min(1,(shown.time-config.timer.startSeconds)/Math.max(.001,extraCapacity)));
-    const timeLabel=inOvertime?`OVERTIME / ${Math.ceil(timeRatio*100)}%`:'TIME';
-    slot('timeLabel',hud,timeLabel,g=>text(g,timeLabel,24,67,{size:6.2,material:'muted',spacing:.6}));
-    slot('clock',clockAnchor,Math.ceil(shown.time),g=>text(g,`${Math.ceil(shown.time)}s`,0,0,{size:10,align:'right',raised:true}));
     scoreAnchor.userData.displayedScore=shown.score;
-    slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:17,align:'right'}));
-    const shownBest=['running','paused'].includes(game.phase)?Math.max(latestView.roundBest||0,Math.min(lastBest,shown.score)):lastBest;
-    slot('best',hud,shownBest,g=>text(g,String(shownBest).padStart(2,'0'),291,39,{size:17,align:'right'}));
+    slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:22,align:'right',maxWidth:91}));
     const latest=celebrations.at(-1),age=latest?.age??Infinity;
     recharge.visible=Boolean(!reducedMotion&&latest&&latest.result.reward>0&&age<1.15);
     if(recharge.visible){
       const base=inOvertime?config.timer.startSeconds:0,range=inOvertime?extraCapacity:config.timer.startSeconds;
       const from=clamp01((latest.startTime-base)/range),to=clamp01((shown.time-base)/range);
-      recharge.position.x=25+from*310;recharge.scale.x=Math.max(.001,to-from);
+      recharge.position.x=19+from*322;recharge.scale.x=Math.max(.001,to-from);
       recharge.material.uniforms.opacity.value=.28*(1-clamp01((age-.4)/.75));
     }
   }
@@ -281,6 +340,7 @@ export function createUI(font, config, reducedMotion=false) {
   const dim=new THREE.Mesh(new THREE.PlaneGeometry(360,640),new THREE.MeshBasicMaterial({color:'#604d6d',transparent:true,opacity:.82,depthWrite:false}));
   dim.position.set(180,-320,20);modal.add(dim);
   const menuContent=group(modal,0,0,23);
+  const compliment=wordCount=>wordCount<3?"You've got potential!":wordCount<10?'Good job!':wordCount<25?'Wonderful word work!':'What a word wizard!';
   const formatDate=value=>{if(!value)return 'This device';const date=new Date(value);return Number.isNaN(date.valueOf())?'This device':date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});};
   const entryList=view=>Array.isArray(view.book?.entries)?view.book.entries:[];
   function filteredEntries(view){
@@ -298,88 +358,93 @@ export function createUI(font, config, reducedMotion=false) {
     const key=JSON.stringify([mode,game.score,game.wordCount,view.roundBest,collectionPage,book.totalWords,stats.totalWordsPlayed,stats.roundsPlayed,stats.personal,view.statsView,book.goal,book.storageStatus,report.roundId,report.newWordCount,view.settings,view.wordbookFilter,view.wordbookSort,view.wordbookQuery,view.wordbookPage,view.wordbookOnlyNew,view.wordDetail,view.menuReturn]);
     slot('menu',menuContent,key,g=>{
       const action=(id,label,x,y,w,h,options={})=>button(g,id,label,x,y,w,h,options);
-      const title=(eyebrow,heading,y=96)=>{text(g,eyebrow,180,y,{size:6.2,align:'center',spacing:.5,material:'muted',maxWidth:280});text(g,heading,180,y+22,{size:25,align:'center',raised:true,maxWidth:290});};
+      const title=(eyebrow,heading,y=96)=>{if(eyebrow)text(g,eyebrow,180,y,{size:6.2,align:'center',spacing:.5,material:'muted',maxWidth:280});text(g,heading,180,y+22,{size:25,align:'center',raised:true,maxWidth:290});};
       const back=(label='Back',id='menu',y=557)=>action(id,label,34,y,292,42,{primary:true});
       if(mode==='paused'){
-        plinth(g,24,186,312,311,18);title('TAKE YOUR TIME.','A little breather.',210);
-        lines(g,'Your letters are right where you left them.\nThe clock can wait.',180,285,{size:8.5,align:'center',lineHeight:16});
-        back('Keep going','menu',348);
-        action('settings','Settings',45,410,128,34);action('help','How to play',187,410,128,34);
-        action('restart','Start a fresh round',70,457,220,24,{quiet:true,small:true});
+        plinth(g,24,197,312,278,20);
+        text(g,'Paused',180,224,{size:29,align:'center',raised:true});
+        back('Keep Playing','menu',289);
+        action('settings','Settings',45,354,128,38);action('help','How to Play',187,354,128,38);
+        action('restart','Start Again',84,415,192,32,{small:true});
       }else if(mode==='over'){
-        plinth(g,18,81,324,539,18);
-        title(report.isPersonalBest?'A NEW PERSONAL BEST.':'A MOMENT WELL SPENT.','Your words add up.',102);
-        text(g,game.score,180,163,{size:57,align:'center',maxWidth:278,raised:true});
-        text(g,`points from ${game.wordCount} ${game.wordCount===1?'word':'words'}`,180,233,{size:9,align:'center'});
-        text(g,`Personal best ${view.best||0}`,180,253,{size:7.6,align:'center',material:'muted'});
+        const preview=[...game.words].reverse().slice(0,8);
+        const rows=preview.length?Math.ceil(preview.length/2):3,shrink=(4-rows)*28;
+        g.position.y=-shrink/2;
+        plinth(g,18,104,324,511-shrink,20);
+        text(g,compliment(game.wordCount),180,127,{size:24,align:'center',raised:true,maxWidth:290});
+        text(g,game.score,180,175,{size:53,align:'center',maxWidth:278,raised:true});
+        text(g,`${game.wordCount} ${game.wordCount===1?'word':'words'} found`,180,241,{size:12,align:'center'});
         const fresh=report.newWords||[],newCount=report.newWordCount??fresh.length;
-        panel(g,34,282,292,96,'cream',12);
-        text(g,newCount?`${newCount} new ${newCount===1?'word':'words'} for your Wordbook`:'Every word adds to your story.',180,296,{size:9.4,align:'center',maxWidth:266});
+        if(preview.length){
+          const words=action('collection','',34,278,292,120-shrink,{quiet:true});words.label=`Your round: ${game.words.join(', ')}. View all words.`;
+          preview.forEach((word,i)=>{
+            const x=8+(i%2)*144,y=5+Math.floor(i/2)*28;
+            panel(words.face,x,y,132,23,'cream',7,0,1.5);
+            text(words.face,word,x+66,y+5,{size:9,align:'center',maxWidth:116,z:5});
+          });
+          if(game.wordCount>8)text(g,`See all ${game.wordCount} words`,180,404,{size:7.5,align:'center',material:'muted'});
+        }else{
+          icon(g,'star',180,311,{scale:1.3,material:'goldInk'});
+          lines(g,'Every word starts with a letter.\nGive it another go!',180,345,{size:10,lineHeight:19,align:'center',material:'ink'});
+        }
         if(newCount){
-          const preview=fresh.slice(0,3).join('  /  ');text(g,preview,180,323,{size:11,align:'center',maxWidth:266,raised:true});
-          text(g,`${book.totalWords||0} words discovered on this device`,180,353,{size:6.8,align:'center',material:'muted'});
-        }else lines(g,game.wordCount?'Your familiar words have a little more history.\nYour collection is ready whenever you are.':'A fresh set of letters is waiting.\nYour Wordbook grows with every first discovery.',180,323,{size:7.6,lineHeight:15,align:'center'});
-        const milestone=report.milestones?.[0];
-        const note=milestone?milestone.title:report.longestWord?`Longest this round: ${report.longestWord}`:book.goal?.title?`Your goal: ${book.goal.title}`:'A little curiosity goes a long way.';
-        text(g,note,180,book.goal?386:398,{size:8.3,align:'center',maxWidth:290,material:milestone?'ink':'muted'});
-        if(book.goal)text(g,`${book.goal.title}  /  ${book.goal.current} of ${book.goal.target}${book.goal.complete?' - complete':''}`,180,410,{size:6.8,align:'center',maxWidth:290,material:'muted'});
-        action('start','Play again',34,433,292,45,{primary:true});
-        action(newCount?'results-new':'wordbook',newCount?'View new words':'View Wordbook',34,493,292,38);
-        action('stats','Your progress',34,550,190,34);
-        action('home','Home',242,550,84,34,{quiet:true});
+          action('results-new',`${newCount} new ${newCount===1?'discovery':'discoveries'}`,79,424-shrink,202,22,{gold:true,round:true,small:true});
+        }
+        action('start','Play Again',72,463-shrink,216,50,{primary:true,centered:true});
+        action('wordbook','Word Book',34,532-shrink,141,38);
+        action('stats','Your Progress',185,532-shrink,141,38);
+        action('home','Home',135,582-shrink,90,22,{quiet:true,small:true});
       }else if(mode==='settings'){
-        plinth(g,18,80,324,539,18);title('MAKE YOURSELF COMFORTABLE.','Your kind of quiet.',101);
+        plinth(g,18,80,324,539,18);title('','Settings',101);
         const settings=view.settings||{};
         const rows=[['effects','Sound effects','A soft sound for letters and words.'],['music','Ambient music','A quiet backdrop to your round.'],['haptics','Haptics','Light taps on supported devices.'],['reducedMotion','Reduced motion','Less bounce, shimmer and decorative motion.']];
         rows.forEach(([id,label,detail],i)=>{const y=180+i*82;panel(g,34,y,292,67,'cream',10);text(g,label,47,y+12,{size:10});text(g,detail,47,y+39,{size:6.4,maxWidth:260,material:'muted'});const toggle=action(`setting:${id}`,settings[id]?'On':'Off',258,y+6,56,28,{small:true});toggle.label=`${label}: ${settings[id]?'on':'off'}`;});
-        lines(g,book.storageStatus?.state==='unavailable'?'Storage unavailable. Changes last for this visit.\nGame timing and rules stay the same.':'Your choices stay on this device.\nGame timing and rules stay the same.',180,519,{size:7,align:'center',lineHeight:13});
+        if(book.storageStatus?.state==='unavailable')text(g,'Changes last for this visit',180,519,{size:7,align:'center',material:'muted'});
         back();
       }else if(mode==='help'){
-        plinth(g,18,61,324,559,18);title('A FEW LITTLE THINGS.','Find your flow.',81);
+        plinth(g,18,61,324,559,18);title('','How to Play',81);
         const sections=[
-          ['Catch. Build. Submit.',`Tap falling letters in order. Tap your word to submit ${config.rules.minWordLength}+ letters. Each word can score once per round.`],
-          ['Two clocks, one little moment.',`The round starts at ${fmt(config.timer.startSeconds)}s. Each pick resets a ${fmt(config.rules.nextLetterSeconds)}s letter bar. On expiry, valid words submit; unfinished words cost ${fmt(config.penalties.clearWordSeconds)}s.`],
-          ['Think a little bigger.',`3 letters restore up to ${fmt(config.rewards.threeLetterMaxSeconds)}s; 4 up to ${fmt(config.rewards.fourLetterMaxSeconds)}s. Longer words earn more time. Gold adds time, with normal points.`],
-          ['A blank is a possibility.',`? can be any letter. It resolves only on submission and scores zero. Nothing reveals validity before you submit.`],
-          ['Quick words buy thinking time.',`${config.combo.wordsToStart} quick words unlock a longer letter window, up to ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)}s. A miss, clear, repeat or ${fmt(config.combo.maxGapSeconds)}s gap resets the chain.`],
-          ['Color changes the moment.',`Purple letters (${fmt(config.letterEffects.purpleChance*100)}%) release ${fmt(config.smoke.durationSeconds)}s of smoke. Blue letters (${fmt(config.letterEffects.blueChance*100)}%) slow time for ${fmt(config.hourglass.durationSeconds)}s. Pick one to use its letter and effect.`],
+          ['Catch letters. Make words.',`Tap letters in order. Tap the paper plane to submit ${config.rules.minWordLength} or more letters.`],
+          ['Longer words, more thinking time.',letterTimingCopy],
+          ['Watch your word bar.',`When it runs out, a valid word submits for you. Unfinished words clear. Words you already scored earn 0 points, with no time penalty.`],
+          ['Keep the round going.',`New words add time. Longer words earn more. A ? stands for any letter and finds its match when you submit.`],
+          ['Meet a little magic.',`${config.specialTiles.goldUnlockWords} words: gold doubles your word score. ${config.specialTiles.iceUnlockWords} words: ice slows time. ${config.specialTiles.smokeUnlockWords} words: magenta brings smoke. ${config.specialTiles.fireUnlockWords} words: fire speeds up play for ${fmt(config.fire.durationSeconds)}s. Ice and fire replace each other.`],
         ];
-        sections.forEach(([heading,body],i)=>{const y=153+i*57;text(g,heading,36,y,{size:8.6});lines(g,body,36,y+17,{width:286,size:6.6,lineHeight:10.4});});
-        lines(g,`Clear or repeat: -${fmt(config.penalties.clearWordSeconds)}s. Impossible prefix or unfinished submit: -${fmt(config.penalties.invalidWordSeconds)}s.\n${config.difficulty.enabled?`Spin builds for ${fmt(config.difficulty.rampSeconds)}s, then rises and falls.`:'Letters stay at easy Z spin.'} Missing a tile is free.`,180,503,{width:286,size:6.3,lineHeight:11,align:'center'});
+        sections.forEach(([heading,body],i)=>{const y=151+i*70;text(g,heading,36,y,{size:10});lines(g,body,36,y+20,{width:286,size:7.5,lineHeight:12});});
+        text(g,`Clear: -${fmt(config.penalties.clearWordSeconds)}s. Invalid word: -${fmt(config.penalties.invalidWordSeconds)}s.`,180,520,{size:6.8,align:'center',material:'muted'});
         back('Got it');
       }else if(mode==='collection'){
-        plinth(g,24,130,312,408,18);title('THIS ROUND, ONE WORD AT A TIME.','Your words.',151);
+        plinth(g,24,130,312,408,18);title('','Your Words',151);
         const words=[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8);
         words.forEach((word,i)=>{const x=45+(i%2)*142,y=230+Math.floor(i/2)*43;panel(g,x,y,128,33,'cream',6);text(g,word,x+9,y+8,{size:10,maxWidth:88});text(g,game.collectedPoints(word),x+118,y+11,{size:7,align:'right',material:'muted'});});
         const previous=action('previous','<',45,420,44,32),next=action('next','>',271,420,44,32);previous.enabled=collectionPage>0;next.enabled=collectionPage<collectionPages-1;
         text(g,`${collectionPage+1} / ${collectionPages}`,180,431,{size:8,align:'center',material:'muted'});
-        back('Back to the letters','menu',475);
+        back('Back','menu',475);
       }else if(mode==='wordbook'){
-        plinth(g,12,72,336,551,18);title(view.wordbookOnlyNew?'FIRST FOUND THIS ROUND.':'A LITTLE COLLECTION OF YOU.','Your Wordbook.',91);
+        plinth(g,12,72,336,551,18);title(view.wordbookOnlyNew?'NEW DISCOVERIES':'','Word Book',91);
         text(g,`${book.totalWords||0} different words discovered`,180,148,{size:8,align:'center',material:'muted'});
         action('book-query',view.wordbookQuery?`Search: ${view.wordbookQuery}`:'Search your words',25,171,310,34);
         const filters=['all','3','4','5','6','7','8+'];
-        filters.forEach((filter,i)=>{const c=action(`book-filter:${filter}`,filter==='all'?'All':filter,25+i*45,217,40,29,{small:true});if(String(view.wordbookFilter||'all')===filter){panel(c.root,8,24,24,2,'ink',1,5,.4);}});
-        [['recent','Newest'],['alpha','A to Z'],['played','Most played']].forEach(([sort,label],i)=>{const c=action(`book-sort:${sort}`,label,25+i*105,258,100,28,{small:true});if((view.wordbookSort||'recent')===sort)panel(c.root,36,23,28,2,'ink',1,5,.4);});
+        filters.forEach((filter,i)=>{const c=action(`book-filter:${filter}`,filter==='all'?'All':filter,25+i*45,217,40,29,{small:true});if(String(view.wordbookFilter||'all')===filter){panel(c.face,8,24,24,2,'ink',1,5,.4);}});
+        [['recent','Newest'],['alpha','A to Z'],['played','Most played']].forEach(([sort,label],i)=>{const c=action(`book-sort:${sort}`,label,25+i*105,258,100,28,{small:true});if((view.wordbookSort||'recent')===sort)panel(c.face,36,23,28,2,'ink',1,5,.4);});
         const entries=filteredEntries(view);bookPages=Math.max(1,Math.ceil(entries.length/5));const page=Math.max(0,Math.min(Number(view.wordbookPage)||0,bookPages-1));
-        entries.slice(page*5,page*5+5).forEach((entry,i)=>{const y=298+i*39;const row=action(`book-word:${entry.word}`,'',25,y,310,33);row.label=`${entry.word}, ${entry.length} letters, played ${entry.timesPlayed} ${entry.timesPlayed===1?'time':'times'}`;text(row.root,entry.word,12,8,{size:10.5,maxWidth:170});text(row.root,`${entry.length} letters  /  ${entry.timesPlayed} ${entry.timesPlayed===1?'play':'plays'}`,297,12,{size:6.4,align:'right',material:'muted',maxWidth:114});});
+        entries.slice(page*5,page*5+5).forEach((entry,i)=>{const y=298+i*39;const row=action(`book-word:${entry.word}`,'',25,y,310,33);row.label=`${entry.word}, ${entry.length} letters, played ${entry.timesPlayed} ${entry.timesPlayed===1?'time':'times'}`;text(row.face,entry.word,12,8,{size:10.5,maxWidth:170});text(row.face,`${entry.length} letters  /  ${entry.timesPlayed} ${entry.timesPlayed===1?'play':'plays'}`,297,12,{size:6.4,align:'right',material:'muted',maxWidth:114});});
         if(!entries.length)lines(g,entryList(view).length?'No words match just yet.\nTry another length or search.':'Your first discovery starts here.\nPlay a round to collect your words.',180,365,{width:280,size:9,lineHeight:18,align:'center'});
         const previous=action('book-prev','<',25,508,44,32),next=action('book-next','>',291,508,44,32);previous.enabled=page>0;next.enabled=page<bookPages-1;
         text(g,`${entries.length} ${entries.length===1?'word':'words'}  /  ${page+1} of ${bookPages}`,180,519,{size:7.3,align:'center',material:'muted'});
         back(view.wordbookOnlyNew?'Back to results':'Back','menu',558);
         text(g,book.storageStatus?.state==='unavailable'?'Storage unavailable - words last for this visit':'Saved on this device',180,609,{size:5.8,align:'center',material:'muted'});
       }else if(mode==='word-detail'){
-        plinth(g,18,88,324,531,18);title('EVERY WORD HAS A HISTORY.','A good find.',108);
+        plinth(g,18,88,324,531,18);title('','Word Details',108);
         const word=typeof view.wordDetail==='string'?view.wordDetail:view.wordDetail?.word;
         const entry=entryList(view).find(item=>item.word===word)||view.wordDetail||{};
         text(g,entry.word||'',180,183,{size:31,align:'center',maxWidth:283,raised:true});
         text(g,`${entry.length||0} letters`,180,230,{size:9,align:'center',material:'muted'});
         const facts=[['First discovered',formatDate(entry.firstSeen)],['Last played',formatDate(entry.lastSeen)],['Times played',String(entry.timesPlayed||0)],['Best word score',`${entry.bestPoints||0} points`],['Without a wildcard',entry.withoutBlanks?'Played':'Not yet']];
         facts.forEach(([label,value],i)=>{const y=277+i*36;text(g,label,39,y,{size:8,material:'muted'});text(g,value,321,y,{size:8,align:'right',maxWidth:150});});
-        lines(g,'A record of your discoveries.\nDefinitions are not part of this word-game dictionary.',180,482,{width:280,size:7,align:'center',lineHeight:15});
-        back('Back to Wordbook','book-back');
+        back('Back to Word Book','book-back');
       }else if(mode==='search'){
-        plinth(g,12,90,336,531,18);title('A WORD YOU REMEMBER.','Search your Wordbook.',112);
+        plinth(g,12,90,336,531,18);title('','Find a Word',112);
         panel(g,25,183,310,49,'cream',10);text(g,view.wordbookQuery||'Type a word...',40,198,{size:18,maxWidth:280,material:view.wordbookQuery?'ink':'muted'});
         text(g,'Search matches any part of a collected word.',180,251,{size:7,align:'center',material:'muted'});
         const rows=['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'];
@@ -387,19 +452,19 @@ export function createUI(font, config, reducedMotion=false) {
         action('key:backspace','Delete',25,462,148,36);action('book-clear-query','Clear search',187,462,148,36);
         back('Show matching words','key:done');
       }else if(mode==='goals'){
-        plinth(g,18,71,324,550,18);title('A LITTLE DIRECTION, IF YOU LIKE.','Pick your curiosity.',92);
+        plinth(g,18,71,324,550,18);title('','Your Goals',92);
         text(g,'Optional goals. No deadlines. No score bonuses.',180,150,{size:7,align:'center',material:'muted'});
         const goals=book.goals||[];
-        goals.slice(0,5).forEach((goal,i)=>{const y=184+i*62;const row=action(`goal:${goal.id}`,'',34,y,292,51);row.label=`${goal.title}, ${goal.current} of ${goal.target}${book.goal?.id===goal.id?', selected':''}`;text(row.root,goal.title,12,10,{size:9.2,maxWidth:235});text(row.root,`${goal.current} / ${goal.target}${goal.complete?'  complete':''}`,12,31,{size:6.8,material:'muted'});if(book.goal?.id===goal.id)text(row.root,'ON',277,20,{size:7,align:'right',material:'ink'});});
+        goals.slice(0,5).forEach((goal,i)=>{const y=184+i*62;const row=action(`goal:${goal.id}`,'',34,y,292,51);row.label=`${goal.title}, ${goal.current} of ${goal.target}${book.goal?.id===goal.id?', selected':''}`;text(row.face,goal.title,12,10,{size:9.2,maxWidth:235});text(row.face,`${goal.current} / ${goal.target}${goal.complete?'  complete':''}`,12,31,{size:6.8,material:'muted'});if(book.goal?.id===goal.id)text(row.face,'ON',277,20,{size:7,align:'right',material:'ink'});});
         action('goal:none','Just play',75,510,210,28,{quiet:true});
         back();
       }else if(mode==='stats'){
-        plinth(g,18,71,324,550,18);title('YOUR OWN PATH, WORD BY WORD.','Your words, over time.',92);
+        plinth(g,18,71,324,550,18);title('','Your Progress',92);
         const recent=view.statsView==='recent';
         [['lifetime','All your words'],['recent','Recent play']].forEach(([id,label],i)=>{
           const tab=action(`stats-view:${id}`,label,34+i*150,155,142,30,{small:true});
           tab.label=`${label}${(id==='recent')===recent?', selected':''}`;
-          if((id==='recent')===recent)panel(tab.root,56,25,30,2,'ink',1,5,.4);
+          if((id==='recent')===recent)panel(tab.face,56,25,30,2,'ink',1,5,.4);
         });
         if(recent){
           const personal=stats.personal||{},observed=Math.max(0,Math.floor(personal.observedSeconds||0));
@@ -419,8 +484,6 @@ export function createUI(font, config, reducedMotion=false) {
           ['3','4','5','6','7','8+'].forEach((length,i)=>{const count=length==='8+'?Object.entries(book.lengthCounts||{}).reduce((sum,[key,n])=>sum+(Number(key)>=8?n:0),0):(book.lengthCounts?.[length]||0);const x=58+i*47;text(g,count,x,419,{size:12,align:'center'});text(g,length,x,439,{size:5.8,align:'center',material:'muted'});});
         }
 
-        text(g,'COMMUNITY COMPARISON',180,476,{size:6.5,align:'center',spacing:.3,material:'muted'});
-        lines(g,'Not enough real player data yet.\nYour personal progress is available now.',180,495,{size:7.6,lineHeight:15,align:'center'});
         back();
       }
     });
@@ -430,8 +493,9 @@ export function createUI(font, config, reducedMotion=false) {
     scene,
     resize(layout){
       currentLayout=layout;
-      hud.position.y=status.position.y=rewardLayer.position.y=layout.height/2-layout.top;
-      intro.position.y=playing.position.y=640-layout.height/2+layout.bottom;
+      hud.position.y=homeHud.position.y=status.position.y=rewardLayer.position.y=layout.height/2-layout.top;
+      intro.position.y=320+(layout.bottom-layout.top)/2;
+      playing.position.y=640-layout.height/2+layout.bottom;
       dim.scale.set(layout.width/360,layout.height/640,1);
     },
     obscures(x,y,margin=0){
@@ -439,60 +503,35 @@ export function createUI(font, config, reducedMotion=false) {
       if(!currentLayout)return false;
       if(overlapsPanel(x,y,currentLayout,margin))return true;
       const localX=x-currentLayout.left,localY=y-currentLayout.top;
-      return effectsVisible&&localX>74-margin&&localX<286+margin&&localY>120-margin&&localY<144+margin;
+      return effectsVisible&&localX>137-margin&&localX<223+margin&&localY>61-margin&&localY<83+margin;
     },
     get blocking(){return Boolean(mode);},
     sync(game,view) {
-      if(game.phase==='over'&&phase!=='over')clearScoreFlights();
-      latestView=view;phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.max(0,Math.min(view.collectionPage||0,collectionPages-1));
-      intro.visible=phase==='ready';playing.visible=phase!=='ready';modal.visible=Boolean(mode);
-      hud.visible=true;
-      lastBest=view.best;syncMeters(game);
+      if(game.phase==='over'&&phase!=='over'){clearScoreFlights();clearGoldCelebration();}
+      phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.max(0,Math.min(view.collectionPage||0,collectionPages-1));
+      intro.visible=homeHud.visible=phase==='ready';playing.visible=phase==='running'||phase==='paused';modal.visible=Boolean(mode);
+      hud.visible=phase==='running'||phase==='paused';
+      syncMeters(game);
       rewardLayer.visible=phase==='running'&&!mode;
       pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
-      slot('homeBook',homeBook.root,view.book?.totalWords||0,g=>text(g,`Wordbook  /  ${view.book?.totalWords||0}`,73,13,{size:8,align:'center',maxWidth:132,z:6}));
-      homeBook.label=`Wordbook, ${view.book?.totalWords||0} discovered words`;
-      const goal=view.book?.goal;
-      slot('homeGoal',homeGoal.root,JSON.stringify(goal||null),g=>text(g,goal?`${goal.title}  /  ${goal.current} of ${goal.target}`:'Pick a little goal  >',154,9,{size:7.4,align:'center',material:'muted',maxWidth:288,z:6}));
-      slot('storageStatus',intro,view.book?.storageStatus?.state||'',g=>{if(view.book?.storageStatus?.state==='unavailable')text(g,'Storage unavailable - discoveries last for this visit',180,614,{size:5,align:'center',material:'danger',maxWidth:310});});
-      homeGoal.label=goal?`Choose a goal. Current goal: ${goal.title}, ${goal.current} of ${goal.target}`:'Choose an optional goal';
+      slot('storageStatus',intro,view.book?.storageStatus?.state||'',g=>{if(view.book?.storageStatus?.state==='unavailable')text(g,'Discoveries saved for this visit',180,583,{size:6,align:'center',material:'muted',maxWidth:310});});
       const signature=game.current+game.currentTiles.map(t=>`${t.blank?'?':t.bonus?'1':'0'}:${t.effect||''}`).join('')+phase+':'+game.letterWindow;
       letterTimer.visible=Boolean(game.current)&&phase!=='over';
       letterTimer.scale.x=Math.max(.001,game.letterSeconds/game.letterWindow);
-      letterTimer.material=materials[game.effects.hourglass>0?'mint':'ink'];
-      slot('word',playing,signature,g=>{
-        text(g,game.current?`${fmt(game.letterWindow)}s / ADD LETTER OR AUTO-SUBMIT`:'PICK LETTERS IN ORDER',338,481,{size:5.8,align:'right',material:'muted',maxWidth:194});
-        if(game.current)text(g,game.current,89,508,{size:24,maxWidth:205,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.effect==='smoke'?'purpleLetter':t.effect==='hourglass'?'blueLetter':t.bonus?'gold':'letterInk'),z:7});
-        else text(g,'Catch a few letters...',89,516,{size:9,material:'muted',maxWidth:211,z:7});
-      });
-      const comboActive=game.comboBonusSeconds>0;
-      slot('combo',playing,`${game.comboCount}:${game.nextLetterWindow}`,g=>{
-        if(!game.comboCount)return;
-        text(g,comboActive?`CHAIN ${game.comboCount} / ${fmt(game.nextLetterWindow)}s PER LETTER`:`CHAIN ${game.comboCount} / ${config.combo.wordsToStart}`,35,549,{size:5.5,material:comboActive?'ink':'muted',spacing:.2,maxWidth:230});
+      letterTimer.material=materials[game.effects.hourglass>0?'ice':game.effects.fire>0?'fire':'ink'];
+      slot('word',submit.face,signature,g=>{
+        if(game.current)text(g,game.current,13,12,{size:24,maxWidth:184,raised:true,colors:game.currentTiles.map(t=>t.blank?'muted':t.effect==='smoke'?'smoke':t.effect==='hourglass'?'iceInk':t.effect==='fire'?'fireInk':t.bonus?'goldInk':'letterInk'),z:7});
+        else text(g,'Catch letters...',13,22,{size:10,material:'muted',maxWidth:184,z:7});
       });
       setEnabled(submit,phase==='running'&&Boolean(game.current));setEnabled(undo,phase==='running'&&Boolean(game.current));
       submit.label=game.current?`Submit ${game.current}`:'Submit current word';undo.label=`Clear whole word, ${fmt(config.penalties.clearWordSeconds)} second penalty`;
-      collection.enabled=game.wordCount>0;
-      slot('words',playing,`${game.wordCount}:${sessionNewWords.size}:${settleAge<discoverySeconds}`,g=>{
-        latestRecentRoot=null;
-        text(g,`${String(game.wordCount).padStart(2,'0')}${game.wordCount?'  >':''}`,338,560,{size:8,align:'right'});
-        if(!game.wordCount)text(g,'A small collection of good ideas.',22,584,{size:7.5,material:'muted'});
-        else [...game.words].reverse().slice(0,3).forEach((word,i)=>{
-          const x=22+i*108,card=group(g,x,579);panel(card,0,0,100,22,'cream',5);
-          const colors=word===resolvedWord&&settleAge<discoverySeconds?[...word].map((_,j)=>resolvedLetters.includes(j)?'gold':'ink'):undefined;
-          text(card,word,7,6,{size:7.5,maxWidth:73,colors});text(card,game.collectedPoints(word),93,7,{size:6,align:'right',material:'muted'});
-          if(sessionNewWords.has(word))text(g,'NEW',x+7,605,{size:4.8,material:'ink',spacing:.5});
-          if(i===0)latestRecentRoot=card;
-        });
-      });
-      const slow=Math.ceil(game.effects.hourglass),smoke=Math.ceil(game.effects.smoke);
-      effectsVisible=phase==='running'&&Boolean(slow||smoke);status.visible=phase!=='ready';
-      slot('effects',status,`${slow}:${smoke}`,g=>{
-        if(slow){panel(g,slow&&smoke?74:132,120,96,23,'mint',11);text(g,`SLOW TIME / ${slow}s`,slow&&smoke?122:180,128,{size:6.7,align:'center'});}
-        if(smoke){panel(g,slow?184:137,120,slow?102:86,23,'paper',11);text(g,`SMOKE / ${smoke}s`,slow?235:180,128,{size:6.7,align:'center'});}
+      const smoke=game.effects.smoke>0;
+      effectsVisible=phase==='running'&&smoke;status.visible=phase!=='ready';
+      slot('effects',status,smoke,g=>{
+        if(smoke){panel(g,137,61,86,22,'smoke',11);text(g,'SMOKE',180,68,{size:6.7,align:'center',material:'smokeInk'});}
       });
       slot('feedback',playing,`${view.feedback}:${view.feedbackKind}`,g=>{
-        if(view.feedback)lines(g,view.feedback,180,434,{width:300,size:7.3,lineHeight:12,align:'center',material:view.feedbackKind==='bad'?'danger':'ink'});
+        if(view.feedback)lines(g,view.feedback,180,522,{width:300,size:7.3,lineHeight:12,align:'center',material:view.feedbackKind==='bad'?'danger':'ink'});
       });
       if(mode)menu(game,view);
       focus=view.focus;hover=view.hover;
@@ -500,9 +539,8 @@ export function createUI(font, config, reducedMotion=false) {
         const active=c.enabled&&(c.id===focus||c.id===hover);
         c.marker.visible=c.enabled&&c.id===focus;
         if(c.primary)c.body.material=materials[active?'primaryHover':'primary'];
-        if(!c.primary&&!c.quiet)c.body.material=materials[c.enabled?(active?'cream':'paper'):'pale'];
-        c.root.position.z=(c.root.parent===modal?27:1)+(active?1:0);
-        c.root.position.y=-c.layoutY;
+        if(!c.primary&&!c.quiet)c.body.material=materials[c.enabled?(c.gold?(active?'goldLight':'gold'):(active?'cream':'paper')):'pale'];
+        c.face.position.z=active?1:0;c.face.position.y=0;
       }
     },
     buttons(){return enabledControls().map(c=>({id:c.id,label:c.label}));},
@@ -515,40 +553,44 @@ export function createUI(font, config, reducedMotion=false) {
     collectionPages(){return collectionPages;},
     wordbookPages(){return bookPages;},
     setReducedMotion(value){reducedMotion=Boolean(value);if(reducedMotion){meters.reset();clearScoreFlights();}},
-    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+320,y:(currentLayout?.top||0)+87}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-119};},
+    selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+180,y:(currentLayout?.top||0)+50}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-59};},
     press(action,now){lastPress=action;pressUntil=now+120;},
     celebrate,
-    reset(){for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();clearScoreFlights();recharge.visible=false;settleAge=Infinity;resolvedWord='';resolvedLetters=[];sessionNewWords.clear();},
+    reset(){clearGoldCelebration();for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();clearScoreFlights();recharge.visible=false;},
     animate(now,dt,game){
       const activeDt=game.phase==='running'?dt:0;
-      meters.advance(activeDt);settleAge+=activeDt;scoreSettleAge+=activeDt;
+      if(goldCelebration){goldCelebration.age+=activeDt;if(goldCelebration.age>=1.6)clearGoldCelebration();else animateGoldCelebration();}
+      meters.advance(activeDt);scoreSettleAge+=activeDt;
       const arrivals=scoreLedger.advance(activeDt);if(arrivals.length&&!reducedMotion)scoreSettleAge=0;
       for(let i=scoreFlights.length-1;i>=0;i--){
         const item=scoreFlights[i],end=item.reduced?.35:item.flight.duration;
         if(item.flight.age+1e-9>=end){removeCelebration(item);scoreLedger.retire(item.flight.id);scoreFlights.splice(i,1);}else animateScoreFlight(item);
       }
       scoreAnchor.scale.setScalar(reducedMotion?1:1+.055*Math.sin(Math.PI*clamp01(scoreSettleAge/.16)));
-      if(latestRecentRoot)latestRecentRoot.position.y=-579+(reducedMotion?0:1.5*(1-easeOut(settleAge/successSeconds)));
+      for(const {tile,angle,index} of brandTiles){tile.position.y=-191+(reducedMotion?0:Math.sin(now*.0013+index*.8)*2);tile.rotation.z=angle+(reducedMotion?0:Math.sin(now*.001+index)*.012);}
       for(let i=celebrations.length-1;i>=0;i--){
         const item=celebrations[i];item.age+=activeDt;
         if(item.age>=config.celebration.durationSeconds){removeCelebration(item);celebrations.splice(i,1);}else animateCelebration(item);
       }
       syncMeters(game);
-      for(const c of controls)if(c.id===lastPress&&now<pressUntil){c.root.position.z-=1.5;c.root.position.y-=1.5;}
+      for(const c of controls){
+        const pressed=c.id===lastPress&&now<pressUntil,active=c.enabled&&(c.id===focus||c.id===hover);
+        c.face.position.y=pressed?-2.5:0;c.face.position.z=pressed?-2:(active?1:0);
+      }
     },
     description(game,view){
-      if(mode==='paused')return 'Paused. A little breather. Your letters are right where you left them. The clock can wait.';
-      if(mode==='over')return `Round complete. ${game.score} points from ${game.wordCount} ${game.wordCount===1?'word':'words'}. Best ${view.best}. ${(view.roundSummary?.newWords||[]).length} new ${(view.roundSummary?.newWords||[]).length===1?'word':'words'}: ${(view.roundSummary?.newWords||[]).join(', ')||'none this round'}.${view.roundSummary?.milestones?.[0]?` Milestone: ${view.roundSummary.milestones[0].title}.`:''}${view.book?.goal?` Goal: ${view.book.goal.title}, ${view.book.goal.current} of ${view.book.goal.target}${view.book.goal.complete?', complete':''}.`:''}`;
+      if(mode==='paused')return 'Paused. Your letters and timers are saved. Keep Playing when you are ready.';
+      if(mode==='over')return `Round complete. ${compliment(game.wordCount)} ${game.score} points from ${game.wordCount} ${game.wordCount===1?'word':'words'}. Your words: ${game.words.join(', ')||'none yet'}. ${(view.roundSummary?.newWords||[]).length} new ${(view.roundSummary?.newWords||[]).length===1?'discovery':'discoveries'}. Play Again, Word Book, and Your Progress are available.`;
       if(mode==='settings')return `Settings. ${Object.entries(view.settings||{}).map(([key,value])=>`${key} ${value?'on':'off'}`).join('. ')}. Settings are saved on this device when local storage is available.`;
       if(mode==='wordbook')return `Wordbook. ${view.book?.totalWords||0} words discovered. Filter ${view.wordbookFilter||'all'}, sort ${view.wordbookSort||'recent'}. Search ${view.wordbookQuery||'empty'}. ${filteredEntries(view).length} matching words. Page ${(view.wordbookPage||0)+1} of ${bookPages}.`;
       if(mode==='word-detail'){const entry=entryList(view).find(entry=>entry.word===(typeof view.wordDetail==='string'?view.wordDetail:view.wordDetail?.word));return entry?`${entry.word}. ${entry.length} letters. First discovered ${formatDate(entry.firstSeen)}. Last played ${formatDate(entry.lastSeen)}. Played ${entry.timesPlayed} ${entry.timesPlayed===1?'time':'times'}. Best word score ${entry.bestPoints}. ${entry.withoutBlanks?'Played without a wildcard.':'Not yet played without a wildcard.'}`:'Word details.';}
       if(mode==='search')return `Search your Wordbook. Query: ${view.wordbookQuery||'empty'}. Use the letter buttons or your keyboard, then Show matching words.`;
       if(mode==='goals')return `Optional goals. ${view.book?.goal?`${view.book.goal.title}: ${view.book.goal.current} of ${view.book.goal.target}.`:'No goal selected.'} No deadlines or score bonuses.`;
-      if(mode==='stats'){const personal=view.book?.stats?.personal||{};return view.statsView==='recent'?`Recent play. ${Math.floor(personal.observedSeconds||0)} seconds observed in your latest 20 minutes of active play. Distinct words played without wildcards: ${[5,6,7].map(length=>`${length} letters: ${personal.distinctByLength?.[length]||0}`).join(', ')}. Each word counts once in this window. ${personal.complete?'Full window.':'The window is still filling.'} Community comparison unavailable: not enough real player data yet.`:`Personal progress. ${view.book?.totalWords||0} different words discovered. ${view.book?.stats?.roundsPlayed||0} ${(view.book?.stats?.roundsPlayed||0)===1?'round':'rounds'} played. Best score ${view.book?.stats?.bestScore||view.best||0}. Community comparison unavailable: not enough real player data yet.`;}
-      if(mode==='help')return `How to play. Tap letters in order and submit words of ${config.rules.minWordLength} or more letters. The letter countdown starts at ${fmt(config.rules.nextLetterSeconds)} seconds. On expiry, a valid unused word submits automatically; an unfinished word is discarded for a ${fmt(config.penalties.clearWordSeconds)} second penalty. Repeats still cost time. ${config.combo.enabled?`${config.combo.wordsToStart} consecutive words less than ${fmt(config.combo.maxGapSeconds)} active seconds apart unlock a combo, adding ${fmt(config.combo.extraSecondsPerWord)} seconds per further word, capped at ${fmt(config.rules.nextLetterSeconds+config.combo.maxExtraSeconds)} seconds per letter. Any failed or discarded word, or a gap of ${fmt(config.combo.maxGapSeconds)} seconds without a word, resets the combo.`:''} Pausing freezes both timers. The hourglass slows the letter countdown along with the round clock; combo expiry still uses active real time. Blank tiles show as ? and automatically resolve to an unused valid word on submission; blanks score zero. Three-letter base reward up to ${fmt(config.rewards.threeLetterMaxSeconds)} seconds; four-letter up to ${fmt(config.rewards.fourLetterMaxSeconds)} seconds; longer words earn more time. Gold adds extra time, with normal points. Earned time can reach ${fmt(config.timer.maxSeconds)} seconds. Purple letters (${fmt(config.letterEffects.purpleChance*100)} percent) release ${fmt(config.smoke.durationSeconds)} seconds of smoke. Blue letters (${fmt(config.letterEffects.blueChance*100)} percent) slow time for ${fmt(config.hourglass.durationSeconds)} seconds. Selecting a colored letter adds it to the word and triggers its effect. Blank tiles have no effect. Separate hourglass and bomb tiles no longer drop. ${config.difficulty.enabled?`Letter Y spin starts at zero, ramps up over ${fmt(config.difficulty.rampSeconds)} active seconds, then smoothly rises and falls randomly within its speed limits. Letters linger face-on and turn quickly through the edge. Pausing freezes the difficulty curve; restarting begins easy.`:'Letter Y spin stays at zero.'} Clear minus ${fmt(config.penalties.clearWordSeconds)} seconds, repeat minus ${fmt(config.penalties.repeatWordSeconds)}, spelling minus ${fmt(config.penalties.invalidWordSeconds)}.`;
+      if(mode==='stats'){const personal=view.book?.stats?.personal||{};return view.statsView==='recent'?`Recent play. ${Math.floor(personal.observedSeconds||0)} seconds observed in your latest 20 minutes of active play. Distinct words played without wildcards: ${[5,6,7].map(length=>`${length} letters: ${personal.distinctByLength?.[length]||0}`).join(', ')}. Each word counts once in this window. ${personal.complete?'Full window.':'The window is still filling.'}`:`Personal progress. ${view.book?.totalWords||0} different words discovered. ${view.book?.stats?.roundsPlayed||0} ${(view.book?.stats?.roundsPlayed||0)===1?'round':'rounds'} played. Best score ${view.book?.stats?.bestScore||view.best||0}.`;}
+      if(mode==='help')return `How to Play. Tap letters in order and submit ${config.rules.minWordLength} or more letters. ${letterTimingCopy} When the letter bar expires, a valid word submits automatically. Repeated words earn 0 points with no time penalty. New words add time; longer words earn more. A blank ? resolves when you submit and scores zero. Pausing freezes both timers. Gold tiles first appear after ${config.specialTiles.goldUnlockWords} words and double the word score. Ice tiles first appear after ${config.specialTiles.iceUnlockWords} scored words and slow time for ${fmt(config.hourglass.durationSeconds)} seconds. Magenta smoke tiles appear after ${config.specialTiles.smokeUnlockWords} words. Fire tiles appear after ${config.specialTiles.fireUnlockWords} words and make falling letters, rotation, arrivals and both timers ${fmt(config.fire.timeScale)} times faster for ${fmt(config.fire.durationSeconds)} seconds. Ice and fire replace each other. Each round resets these milestones. ${config.difficulty.enabled?`Letter Y spin starts at zero, ramps up over ${fmt(config.difficulty.rampSeconds)} active seconds, then smoothly rises and falls randomly within its speed limits.`:'Letter Y spin stays at zero.'} Clear costs ${fmt(config.penalties.clearWordSeconds)} seconds; invalid words cost ${fmt(config.penalties.invalidWordSeconds)} seconds.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
-      return `${phase==='ready'?'CLTTR. A little word wonder. Catch letters. Find words. Keep the moment going.':`Time ${Math.ceil(game.remaining)} seconds.${game.remaining>config.timer.startSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.startSeconds*100)} percent.`:''} Points ${game.score}. Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindow)} seconds.`:''}${game.comboCount?` ${game.comboBonusSeconds>0?'Combo':'Chain'} ${game.comboCount}. Next-letter window ${fmt(game.nextLetterWindow)} seconds. Chain expires in ${Math.ceil(game.comboSeconds)} seconds.`:''} Words collected ${game.wordCount}: ${game.words.join(', ')||'none'}.${reward} ${view.feedback}`}`;
+      return phase==='ready'?'CLTTR. Catch letters. Discover your next word.':`Score ${game.score}. Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindowSeconds)} seconds.`:''}${reward} ${view.feedback}${goldCelebration?' Double Score! This word earned twice the points.':''}`;
     },
   };
 }

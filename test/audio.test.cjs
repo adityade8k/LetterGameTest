@@ -94,6 +94,66 @@ test('effects and ambient preferences are independent, and muting cancels schedu
   audio.dispose();
 });
 
+test('menu and lifecycle cues stay distinct, short, and quiet', async t => {
+  const contexts = mockAudio(t);
+  const { createAudio } = await modulePromise, audio = createAudio({ effects: true });
+  await audio.unlock();
+  const context = contexts[0], signatures = new Set();
+  for (const kind of ['ui', 'start', 'pause', 'resume', 'clear', 'repeat', 'miss', 'invalid', 'gameover', 'gold', 'fire']) {
+    context.currentTime += 1;
+    const before = context.oscillators.length;
+    assert.equal(audio.play(kind), true, `${kind} is a supported cue`);
+    const notes = context.oscillators.slice(before);
+    assert.ok(notes.length >= 2 && notes.length <= 8, `${kind} has bounded voices`);
+    for (const note of notes) {
+      assert.ok(note.stops[0] > note.started, `${kind} is not a sustained note`);
+      assert.ok(note.stops[0] - context.currentTime < .65, `${kind} finishes promptly`);
+      const peak = note.destination.gain.events.find(event => event[0] === 'linear')[1];
+      assert.ok(peak <= .025, `${kind} stays below word-celebration volume`);
+    }
+    const signature = JSON.stringify(notes.map(note => [note.frequency.events[0][1], Math.round((note.started - context.currentTime) * 1000)]));
+    assert.equal(signatures.has(signature), false, `${kind} is audibly distinguishable`);
+    signatures.add(signature);
+  }
+  audio.dispose();
+});
+
+test('pausing ambient leaves menu feedback available, while hidden activity still silences everything', async t => {
+  const contexts = mockAudio(t);
+  const { createAudio } = await modulePromise, audio = createAudio({ effects: true, music: true });
+  await audio.unlock();
+  const context = contexts[0], originalAmbient = context.oscillators.slice();
+  audio.setAmbientActive(false);
+  assert.ok(originalAmbient.every(note => note.disconnected));
+  assert.equal(audio.play('pause'), true);
+  const pauseNotes = context.oscillators.slice(3);
+  audio.setAmbientActive(false);
+  assert.ok(pauseNotes.every(note => !note.disconnected));
+  audio.setAmbientActive(true);
+  assert.equal(context.oscillators.length, 10); // Three new ambient voices, no replayed feedback.
+  audio.setActive(false);
+  assert.ok(context.oscillators.every(note => note.disconnected));
+  audio.setAmbientActive(true);
+  assert.equal(audio.play('ui'), false);
+  assert.equal(audio.play('gameover'), false);
+  assert.equal(context.oscillators.length, 10);
+  audio.setActive(true);
+  assert.equal(context.oscillators.length, 13);
+  audio.dispose();
+});
+
+test('new interaction cues respect explicit mute and cannot unlock a device', async t => {
+  const contexts = mockAudio(t);
+  const { createAudio } = await modulePromise, audio = createAudio({ effects: false });
+  for (const kind of ['ui', 'start', 'pause', 'resume', 'clear', 'repeat', 'miss', 'invalid', 'gameover', 'gold', 'fire']) {
+    assert.equal(audio.play(kind), false);
+  }
+  assert.equal(contexts.length, 0);
+  assert.equal(await audio.unlock(), false);
+  assert.equal(contexts.length, 0);
+  audio.dispose();
+});
+
 test('low-time cue is restrained and teardown cannot recreate audio', async t => {
   const contexts = mockAudio(t);
   const { createAudio } = await modulePromise, audio = createAudio({ effects: true });

@@ -19,8 +19,35 @@ function geometry(key,build){if(!cache.has(key))cache.set(key,build());return ca
 function polygon(key,points,depth=1.4){return geometry(key,()=>{const s=new THREE.Shape();points.forEach(([x,y],i)=>i?s.lineTo(x,y):s.moveTo(x,y));s.closePath();return new THREE.ExtrudeGeometry(s,{depth,bevelEnabled:true,bevelSize:.18,bevelThickness:.2,bevelSegments:1,curveSegments:8});});}
 function tube(key,points,radius=1.1){return geometry(key,()=>new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),28,radius,7,false));}
 export function createIcon(kind,ink,accent=ink){
-  const group=new THREE.Group();
+  const group=new THREE.Group();group.userData.iconKind=kind;
   const add=(geo,mat=ink,x=0,y=0,z=0)=>{const mesh=new THREE.Mesh(geo,mat);mesh.position.set(x,y,z);group.add(mesh);return mesh;};
+  if(kind==='back')add(polygon('back',[[5,-8],[-5,0],[5,8],[8,5],[2,0],[8,-5]],2));
+  if(kind==='play')add(polygon('play', [[-5,-8],[8,0],[-5,8]],2));
+  if(kind==='star'){
+    const points=[];for(let i=0;i<10;i++){const angle=Math.PI/2+i*Math.PI/5,r=i%2?4.2:9;points.push([Math.cos(angle)*r,Math.sin(angle)*r]);}
+    add(polygon('star',points,2));
+  }
+  if(kind==='coin'){
+    add(geometry('coin-body',()=>{const shape=new THREE.Shape();shape.absarc(0,0,9,0,Math.PI*2,false);return new THREE.ExtrudeGeometry(shape,{depth:2.4,bevelEnabled:true,bevelSize:.65,bevelThickness:.65,bevelSegments:3,curveSegments:24});}));
+    add(geometry('coin-rim',()=>new THREE.TorusGeometry(6.5,.5,6,32)),accent,0,0,3.1);
+    add(tube('coin-stamp',[[0,-3,3.1],[0,3,3.1]],.85),accent);
+  }
+  if(kind==='gear'){
+    add(geometry('gear-ring',()=>new THREE.TorusGeometry(6,2.6,8,20)),ink,0,0,1.3);
+    for(let i=0;i<8;i++){
+      const angle=i*Math.PI/4,tooth=add(geometry('gear-tooth',()=>new THREE.BoxGeometry(4,5,2.8)),ink,Math.sin(angle)*8.2,Math.cos(angle)*8.2,1);
+      tooth.rotation.z=-angle;
+    }
+  }
+  if(kind==='book'){
+    add(polygon('book-left',[[-12,9],[-3,8],[0,5],[0,-10],[-3,-7],[-12,-6]],2));
+    add(polygon('book-right',[[12,9],[3,8],[0,5],[0,-10],[3,-7],[12,-6]],2));
+    add(tube('book-spine',[[0,5,2.5],[0,-9,2.5]],.7),accent);
+    for(const side of [-1,1])for(const y of [3,-1])add(tube(`book-line-${side}-${y}`,[[side*4,y,2.5],[side*9,y+1,2.5]],.6),accent);
+  }
+  if(kind==='progress'){
+    for(let i=0;i<3;i++)add(polygon(`progress-bar-${i}`,[[i*7-10,-8],[i*7-5,-8],[i*7-5,-3+i*6],[i*7-10,-3+i*6]],2));
+  }
   if(kind==='arrow')add(polygon('arrow',[[-7,-5],[-5,-7],[5,3],[5,-2],[8,-2],[8,8],[-2,8],[-2,5],[3,5]]));
   if(kind==='trash'){
     add(polygon('trash-body',[[-6,4],[6,4],[5,-8],[-5,-8]],1.5));
@@ -34,7 +61,7 @@ export function createIcon(kind,ink,accent=ink){
     add(tube('plane-crease',[[-1,-2,2.7],[6,5,2.7]],.45),accent);
   }
   if(kind==='pause'){
-    for(const x of [-4,4])add(geometry('pause-bar',()=>new THREE.CapsuleGeometry(1.5,10,4,8)),ink,x,0,1);
+    for(const x of [-4,4])add(geometry('pause-bar',()=>new THREE.CapsuleGeometry(2,10,4,8)),ink,x,0,1);
   }
   if(kind==='undo'){
     add(tube('undo',[[-6,4,1],[-1,6,1],[5,3,1],[5,-3,1],[0,-6,1],[-3,-5,1]],1.2));

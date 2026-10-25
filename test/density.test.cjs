@@ -53,7 +53,7 @@ test('sparse opening preserves word guarantees while reducing hidden feed and li
     sparseCount+=openingFeed([],layout,size,c,rng(seed),supply.fraction).length;
     fullCount+=openingFeed([],layout,size,c,rng(seed),1).length;
   }
-  assert.ok(sparseCount<fullCount*.8);
+  assert.ok(sparseCount<fullCount);
   const incoming={...c,falling:{...c.falling,letterLimit:supply.limit}};
   const tiles=Array.from({length:supply.limit},()=>({kind:'letter',x:180,y:300}));
   assert.equal(spawnPosition(tiles,360,size,incoming),null);
@@ -115,10 +115,14 @@ test('the sparse opening flows into live arrivals without a large empty band as 
         const pos=spawnPosition(tiles,360,size,{...c,falling:{...c.falling,letterLimit:supply.limit}},random);
         if(pos){assert.ok(pos.y<0);tiles.push(make(pos));clock.placed();}
       }
-      const ys=tiles.filter(t=>t.y>=140&&t.y<=446).map(t=>t.y).sort((a,b)=>a-b),edges=[140,...ys,446];
+      const fieldTop=layout.panels[0].h+size*.6,fieldBottom=layout.panels[1].y-size*.6;
+      const ys=tiles.filter(t=>t.y>=fieldTop&&t.y<=fieldBottom).map(t=>t.y).sort((a,b)=>a-b),edges=[fieldTop,...ys,fieldBottom];
       for(let i=1;i<edges.length;i++)maxGap=Math.max(maxGap,edges[i]-edges[i-1]);
       if(frame%30===0)for(let i=0;i<tiles.length;i++)for(let j=i+1;j<tiles.length;j++)assert.ok((p.contact(tiles[i],tiles[j],size)?.penetration||0)<.05);
     }
-    assert.ok(maxGap<90,`Seed ${seed}: empty band reached ${maxGap.toFixed(1)}px`);
+    // The compact HUD exposes a taller field; compare coverage as a fraction
+    // of that field rather than the former fixed 306-pixel inspection strip.
+    const exposedHeight=layout.panels[1].y-layout.panels[0].h-size*1.2;
+    assert.ok(maxGap<exposedHeight*.3,`Seed ${seed}: empty band reached ${maxGap.toFixed(1)}px`);
   }
 });

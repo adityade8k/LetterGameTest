@@ -29,10 +29,12 @@ let best=0,roundBest=0,resumeAfterMenu=false,roundId='',activeOffset=0,bestChain
 const menuStack=[];
 let storage;
 try{storage=localStorage;}catch{/* Private browsers may deny storage access. */}
-const settings={effects:false,music:false,haptics:false,reducedMotion};
+const settings={effects:true,music:false,haptics:false,reducedMotion};
 try{const saved=JSON.parse(storage?.getItem('clttr.settings.v1')||'null');if(saved)for(const key of Object.keys(settings))if(typeof saved[key]==='boolean')settings[key]=saved[key];}catch{}
 reducedMotion=settings.reducedMotion;
 const audio=createAudio(settings);
+let audioReady=Promise.resolve(false);
+function sound(kind,info){void audioReady.then(()=>audio.play(kind,info));}
 const ruleSignature=JSON.stringify(Object.fromEntries(Object.entries(config).filter(([key])=>!['feedback','celebration','engagement'].includes(key))));
 let ruleHash=2166136261;for(const char of ruleSignature)ruleHash=Math.imul(ruleHash^char.charCodeAt(0),16777619)>>>0;
 const progress=new ProgressStore(storage,{ruleVersion:`clttr-${ruleHash.toString(16)}`,dictionaryVersion:'bundled-english-v1'});
@@ -52,7 +54,7 @@ function checkpoint(){
 function saveSettings(){
   reducedMotion=settings.reducedMotion;audio.setSettings(settings);scene?.setReducedMotion(reducedMotion);
   try{storage?.setItem('clttr.settings.v1',JSON.stringify(settings));}catch{}
-  void audio.unlock();
+  audioReady=audio.unlock();
 }
 // Another tab may add words while this round is paused or a menu is open.
 // Refresh is read-only, so storage notifications cannot form a save loop.
@@ -139,15 +141,18 @@ function handle(result){
     result.isNew=discovery.isNew;result.newWithoutBlanks=discovery.newWithoutBlanks;
     result.isRecord=result.word.length>(typeof previousLongest==='string'?previousLongest.length:previousLongest.length||0);
     result.milestone=discovery.milestone;
-    scene.ui.celebrate(result,game);audio.play('word',{length:result.word.length,isNew:result.isNew,isRecord:result.isRecord,blankCount:result.blankCount});
+    scene.ui.celebrate(result,game);sound('word',{length:result.word.length,isNew:result.isNew,isRecord:result.isRecord,blankCount:result.blankCount});
+    if(result.scoreMultiplier>1&&result.points>0)sound('gold');
+  }else if(result.type==='repeat'){
+    feedback(`${result.word} / Already found / +0`,'repeat');sound('repeat');
   }else if(result.type==='penalty'){
-    const reason={repeat:'Already played this round',clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
-    feedback(`${reason} / -${format(result.penalty)}s`,'bad');audio.play('penalty');
+    const reason={clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
+    feedback(`${reason} / -${format(result.penalty)}s`,'bad');sound(result.reason==='clear'?'clear':'invalid');
   }else if(result.type==='effect'){
-    if(result.effect==='smoke'){scene.releaseSmoke();feedback(`Smoke screen / ${format(result.duration)} seconds`);audio.play('grenade');}
-    else{feedback(`Slow time / ${format(result.duration)} seconds`,'slow');audio.play('hourglass');}
+    if(result.effect==='smoke'){scene.releaseSmoke();feedback('Smoke!','smoke');sound('grenade');}
+    else{view.feedback='';view.feedbackKind='';feedbackUntil=0;sound(result.effect==='fire'?'fire':'hourglass');}
   }
-  else if(result.type==='letter')audio.play('letter',{length:game.current.length});
+  else if(result.type==='letter')sound('letter',{length:game.current.length});
   sync();
 }
 function visibleTiles(){return tiles.filter(tile=>exposedTile(tile)&&(tile.bornAt===undefined||game.elapsed-tile.bornAt>=config.falling.replacementFadeSeconds));}
@@ -163,23 +168,24 @@ function pick(tile){
   handle(result);if(result.tileEffect)handle({type:'effect',...result.tileEffect});refillChoices(true);updateLabel();
 }
 function sync(){
+  audio.setActive(!document.hidden);
   view.best=best;view.roundBest=roundBest;view.soundOn=settings.effects;
   if(game.phase!==lastPhase){
     lastPhase=game.phase;
     if(game.phase==='over'){
-      finishRound();tiles=tiles.filter(tile=>tile.kind!=='hourglass');scene?.reset();view.mode='over';view.focus='start';
+      finishRound();tiles=tiles.filter(tile=>tile.kind!=='hourglass');scene?.reset();view.mode='over';view.focus='start';sound('gameover');
     }
   }
-  audio.setActive(game.phase==='running'&&!view.mode);
+  audio.setAmbientActive(game.phase==='running'&&!view.mode);
   scene?.ui.sync(game,view);
 }
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
-  const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (purple, smoke)':tile.effect==='hourglass'?' (blue, slow time)':''}${tile.bonus?' (gold)':''}`).join(', ');
-  const effects=`${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
+  const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (magenta, smoke)':tile.effect==='hourglass'?' (ice, slow time)':tile.effect==='fire'?' (fire, double speed)':''}${tile.bonus?' (gold, double score)':''}`).join(', ');
+  const effects=`${game.effects.fire>0?` Double speed: ${Math.ceil(game.effects.fire)} seconds.`:''}${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
-  const label=`${description}${effects} ${view.mode?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; Escape pauses or resumes.`;
+  const label=`${description}${effects} ${view.mode||game.phase==='ready'?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; Escape pauses or resumes.`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
@@ -189,14 +195,14 @@ function begin(){
   activeOffset=view.book.stats?.activeSeconds||0;bestChain=0;lastCheckpoint=0;lastLowWarning=-Infinity;
   progress.beginRound(roundId);refreshBook();
   Object.assign(view,{mode:'',focus:'',hover:'',collectionPage:0,feedback:'',feedbackKind:'',roundSummary:null});feedbackUntil=0;resumeAfterMenu=false;menuStack.length=0;
-  sync();updateLabel();scene.canvas.focus({preventScroll:true});
+  sync();updateLabel();scene.canvas.focus({preventScroll:true});sound('start');
 }
 function togglePause(){
   if(game.phase==='running'){
     handle(game.pause(performance.now()));
-    checkpoint();if(game.phase==='paused'){view.mode='paused';view.focus='menu';}
+    checkpoint();if(game.phase==='paused'){view.mode='paused';view.focus='menu';sound('pause');}
   }else if(game.phase==='paused'){
-    game.resume(performance.now());view.mode='';view.focus='';resumeAfterMenu=false;
+    game.resume(performance.now());view.mode='';view.focus='';resumeAfterMenu=false;sound('resume');
   }
   sync();updateLabel();
 }
@@ -209,6 +215,7 @@ function openMenu(mode){
   view.mode=mode;view.focus='';view.collectionPage=0;sync();updateLabel();
 }
 function closeMenu(){
+  sound('ui');
   const previous=menuStack.pop();
   view.mode=previous?previous.mode:(game.phase==='over'?'over':game.phase==='paused'?'paused':'');view.focus='';
   if(previous?.resume)game.resume(performance.now());
@@ -218,11 +225,11 @@ function home(){
   if(roundId&&game.phase!=='over')finishRound(true);
   game.reset();roundId='';scene.reset();menuStack.length=0;resumeAfterMenu=false;
   Object.assign(view,{mode:'',focus:'',hover:'',feedback:'',feedbackKind:''});
-  const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false,effect:null}));
+  tiles=[];
   sync();updateLabel();
 }
 function queryInput(key){
+  sound('ui');
   if(key==='done'){closeMenu();return;}
   if(key==='backspace')view.wordbookQuery=view.wordbookQuery.slice(0,-1);
   else if(/^[A-Z]$/i.test(key)&&view.wordbookQuery.length<32)view.wordbookQuery+=key.toUpperCase();
@@ -232,6 +239,7 @@ function act(action){
   scene.ui.press(action,performance.now());
   view.hover='';view.focus='';hover=null;
   const [type,value]=action.split(':');
+  if(!['start','restart','pause','resume','submit','undo','menu','sound','key'].includes(type))sound('ui');
   if(type==='book-filter'){view.wordbookFilter=value;view.wordbookPage=0;}
   else if(type==='stats-view'){view.statsView=value;}
   else if(type==='book-sort'){view.wordbookSort=value;view.wordbookPage=0;}
@@ -243,9 +251,9 @@ function act(action){
     case 'start':case 'restart':begin();return;
     case 'home':home();return;
     case 'pause':case 'resume':togglePause();return;
-    case 'submit':handle(game.submit(performance.now()));break;
-    case 'undo':handle(game.undo(performance.now()));break;
-    case 'sound':settings.effects=!settings.effects;saveSettings();audio.play('letter');break;
+    case 'submit':if(!game.current&&game.phase==='running'){feedback('Catch a letter first.');sound('miss');}else handle(game.submit(performance.now()));break;
+    case 'undo':if(!game.current&&game.phase==='running'){feedback('Your tray is empty.');sound('miss');}else handle(game.undo(performance.now()));break;
+    case 'sound':settings.effects=!settings.effects;saveSettings();sound('letter');break;
     case 'help':case 'settings':case 'stats':case 'goals':openMenu(action);return;
     case 'wordbook':
       view.wordbookOnlyNew=false;view.wordbookPage=0;view.wordbookQuery='';view.wordbookFilter='all';openMenu('wordbook');return;
@@ -266,15 +274,15 @@ function act(action){
   }
   sync();updateLabel();
 }
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&game.phase==='running')togglePause();});
+document.addEventListener('visibilitychange',()=>{audio.setActive(!document.hidden);if(document.hidden&&game.phase==='running')togglePause();else sync();});
 window.addEventListener('pagehide',()=>checkpoint());
 motionPreference.addEventListener?.('change',event=>{settings.reducedMotion=event.matches;saveSettings();});
 window.addEventListener('keydown',event=>{
   if(!scene||event.ctrlKey||event.metaKey||event.altKey)return;
-  void audio.unlock();
+  audioReady=audio.unlock();
   if(view.mode==='search'&&(/^[a-z]$/i.test(event.key)||event.key==='Backspace'||event.key==='Enter')){event.preventDefault();queryInput(event.key==='Backspace'?'backspace':event.key==='Enter'?'done':event.key);return;}
   if(event.key==='Tab'){
-    event.preventDefault();view.focus=scene.ui.focusNext(view.focus,event.shiftKey?-1:1);scene.canvas.focus({preventScroll:true});sync();updateLabel();return;
+    event.preventDefault();sound('ui');view.focus=scene.ui.focusNext(view.focus,event.shiftKey?-1:1);scene.canvas.focus({preventScroll:true});sync();updateLabel();return;
   }
   if(event.key==='Escape'){
     event.preventDefault();if(view.mode&&view.mode!=='paused'&&view.mode!=='over')closeMenu();else if(game.phase!=='over')togglePause();return;
@@ -289,10 +297,10 @@ window.addEventListener('keydown',event=>{
   }
   if(view.mode||game.phase!=='running')return;
   if(event.key==='Backspace'){event.preventDefault();act('undo');}
-  else if(event.key==='?'||event.key==='*'){event.preventDefault();const tile=visibleTiles().find(t=>t.blank);if(tile)pick(tile);}
+  else if(event.key==='?'||event.key==='*'){event.preventDefault();const tile=visibleTiles().find(t=>t.blank);if(tile)pick(tile);else{feedback('No blank in reach yet.');sound('miss');}}
   else if(/^[a-z]$/i.test(event.key)){
     event.preventDefault();const tile=visibleTiles().filter(t=>t.letter===event.key.toUpperCase()).sort((a,b)=>b.y-a.y)[0];
-    if(tile)pick(tile);else feedback(`No ${event.key.toUpperCase()} in reach yet.`);
+    if(tile)pick(tile);else{feedback(`No ${event.key.toUpperCase()} in reach yet.`);sound('miss');}
   }
 });
 try{
@@ -300,9 +308,10 @@ try{
   updateLayout();
   scene.canvas.addEventListener('pointerdown',event=>{
     if(event.button!==0)return;
-    event.preventDefault();void audio.unlock();scene.canvas.focus({preventScroll:true});view.focus='';
+    event.preventDefault();audioReady=audio.unlock();scene.canvas.focus({preventScroll:true});view.focus='';
+    scene.tapFeedback(event.clientX,event.clientY);
     const hit=scene.hit(event.clientX,event.clientY);
-    if(hit?.action)act(hit.action);else if(hit?.tile)pick(hit.tile);
+    if(hit?.action)act(hit.action);else if(hit?.tile)pick(hit.tile);else sound('miss');
   });
   scene.canvas.addEventListener('pointermove',event=>{
     const hit=scene.hit(event.clientX,event.clientY);view.hover=hit?.action||'';
@@ -313,14 +322,13 @@ try{
   scene.canvas.addEventListener('blur',()=>{view.focus='';});
   scene.canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();if(game.phase==='running')togglePause();scene.canvas.setAttribute('aria-label','The 3D scene needs a refresh. Your best score and saved Wordbook are safe.');});
   scene.canvas.addEventListener('webglcontextrestored',()=>location.reload());
-  const positions=[[70,38,-.14],[207,30,.16],[290,95,-.22],[147,121,.17],[54,156,-.18],[261,166,.14]];
-  tiles=[...'CLTTR'].map((letter,i)=>({...makeTile(letter,layout.left+positions[i][0],layout.top+140+positions[i][1]),tilt:0,bonus:i===2,grenade:false,effect:null}));
+  tiles=[];
   sync();updateLabel();let previous=performance.now();
   function frame(now){
     const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));
     if(game.phase==='running'){
       if(game.elapsed-lastCheckpoint>=10)checkpoint();
-      if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){audio.play('lowtime');lastLowWarning=game.elapsed;}
+      if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){sound('lowtime');lastLowWarning=game.elapsed;}
       const worldDt=dt*game.timeScale;
       densityRamp.advance(worldDt,game.wordCount);
       stepTiles(tiles,worldDt,{width,size,speed:config.falling.pixelsPerSecond,config,reducedMotion,difficultyLevel:difficulty.valueAt(game.elapsed)});

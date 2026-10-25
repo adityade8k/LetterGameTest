@@ -8,54 +8,60 @@ const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8,
 const create = (options, random = () => 0) => { const game = new WordGame(dictionary, {specialTiles:{warmupSeconds:0}, ...options}, random); game.start(0); return game; };
 const spell = (game, word, now = 0, goldIndices = []) => [...word].map((letter, index) => game.select(letter, now, { bonus: goldIndices.includes(index) })).at(-1);
 
-test('hourglass runs for five unscaled seconds and slows the clock to 40 percent', () => {
+test('hourglass runs for 7.5 unscaled seconds and slows the clock to 40 percent', () => {
   const game = create();
-  assert.equal(game.activate('hourglass', 0).duration, 5);
+  assert.equal(game.activate('hourglass', 0).duration, 7.5);
   assert.equal(game.timeScale, .4);
   game.advance(2000);
   near(game.remaining, 59.2);
-  near(game.effects.hourglass, 3);
-  game.advance(5000);
-  near(game.remaining, 58);
+  near(game.effects.hourglass, 5.5);
+  game.advance(7500);
+  near(game.remaining, 57);
   assert.equal(game.effects.hourglass, 0);
   assert.equal(game.timeScale, 1);
-  game.advance(6000);
-  near(game.remaining, 57);
+  game.advance(8500);
+  near(game.remaining, 56);
 });
 test('a frame crossing effect expiry drains both slow and normal time accurately', () => {
   const game = create(); game.activate('hourglass', 0); game.advance(8000);
-  near(game.remaining, 55);
+  near(game.remaining, 56.5);
   near(game.elapsed, 8);
   assert.equal(game.effects.hourglass, 0);
 });
-test('smoke and hourglass each expire after five active seconds when combined', () => {
+test('smoke expires after five active seconds while ice lasts 7.5 seconds when combined', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('smoke', 0);
   game.advance(4000);
   near(game.effects.smoke, 1);
-  near(game.effects.hourglass, 1);
+  near(game.effects.hourglass, 3.5);
   game.advance(5000);
-  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0 });
+  assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
   near(game.remaining, 58);
+  game.advance(7500);
+  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
+  near(game.remaining, 57);
 });
 test('pause freezes both effects; resume uses only active time', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('smoke', 0);
   game.pause(2000); game.advance(100000);
   assert.equal(game.activate('smoke', 100000).type, 'ignored');
-  near(game.effects.hourglass, 3); near(game.effects.smoke, 3);
+  near(game.effects.hourglass, 5.5); near(game.effects.smoke, 3);
   game.resume(100000); game.advance(103000);
-  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0 });
+  assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
   near(game.remaining, 58);
   near(game.elapsed, 5);
+  game.advance(105500);
+  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
+  near(game.remaining, 57);near(game.elapsed, 7.5);
 });
 test('a second pickup refreshes duration instead of stacking speed multipliers', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('hourglass', 4000);
-  assert.equal(game.effects.hourglass, 5);
+  assert.equal(game.effects.hourglass, 7.5);
   assert.equal(game.timeScale, .4);
-  game.advance(9000);
-  near(game.remaining, 56.4);
+  game.advance(11500);
+  near(game.remaining, 55.4);
   assert.equal(game.timeScale, 1);
 });
 test('effects preserve the pending word, bonus letters and points', () => {
@@ -71,75 +77,77 @@ test('slow time does not reduce fixed penalties', () => {
   const game = create(); game.activate('hourglass', 0);
   spell(game, 'CAT', 1000); game.undo(1000);
   near(game.remaining, 57.6);
-  assert.equal(game.effects.hourglass, 4);
+  assert.equal(game.effects.hourglass, 6.5);
 });
 test('late pickups cannot revive an expired game and effects clear on game over', () => {
   const late = create();
   assert.equal(late.activate('hourglass', 60001).type, 'ended');
-  assert.deepEqual(late.effects, { hourglass: 0, smoke: 0 });
+  assert.deepEqual(late.effects, { hourglass: 0, smoke: 0, fire: 0 });
   const active = create();
   active.activate('hourglass', 59000); active.activate('smoke', 59000);
   active.advance(61500);
   assert.equal(active.phase, 'over');
   assert.equal(active.remaining, 0);
-  assert.deepEqual(active.effects, { hourglass: 0, smoke: 0 });
+  assert.deepEqual(active.effects, { hourglass: 0, smoke: 0, fire: 0 });
 });
-test('gold C in CATCH increases default time from 14.4 to 18 seconds with the same twelve points', () => {
+test('gold C in CATCH doubles twelve points to twenty-four while preserving 14.4 seconds', () => {
   const game = create(); spell(game, 'CATCH', 30000, [0]);
-  near(game.pendingReward, 18);
+  near(game.pendingReward, 14.4);assert.equal(game.pendingBasePoints,12);assert.equal(game.pendingPoints,24);
   assert.equal(game.hasBonus, true);
   const result = game.submit(30000);
-  assert.equal(result.points, 12);
-  near(result.bonusReward, 3.6);
-  near(result.reward, 18);
-  near(game.remaining, 48);
-  assert.equal(game.score, 12);
+  assert.equal(result.points, 24);assert.equal(result.basePoints,12);assert.equal(result.bonusPoints,12);assert.equal(result.scoreMultiplier,2);
+  near(result.bonusReward, 0);
+  near(result.reward, 14.4);
+  near(game.remaining, 44.4);
+  assert.equal(game.score, 24);assert.equal(game.collectedPoints('CATCH'),24);
   assert.equal(game.hasBonus, false);
+  assert.equal(game.pendingScoreMultiplier,1);
   assert.deepEqual(game.currentTiles, []);
 });
-test('multiple gold letters add their own time boosts without multiplying the whole word', () => {
+test('multiple gold letters double the word only once, without increasing its time reward', () => {
   const game = create(); spell(game, 'CATCH', 30000, [0, 2]);
-  near(game.pendingReward, 19.2);
-  assert.equal(game.submit(30000).points, 12);
+  near(game.pendingReward, 14.4);
+  const result=game.submit(30000);assert.equal(result.points,24);assert.equal(result.scoreMultiplier,2);
 });
-test('gold multipliers and reward rates are configurable; the timer cap still applies', () => {
-  const game = create({ timer: {maxSeconds:60}, bonusLetters: { timeMultiplier: 3 }, rewards: { secondsPerPoint: .5 } });
+test('gold score multipliers and independent reward rates are configurable; the timer cap still applies', () => {
+  const game = create({ timer: {maxSeconds:60}, bonusLetters: { scoreMultiplier: 3 }, rewards: { secondsPerPoint: .5 } });
   spell(game, 'CATCH', 1000, [0]);
   const result = game.submit(1000);
-  near(result.requestedReward, 10.8);
+  near(result.requestedReward, 7.2);
   assert.equal(result.reward, 1);
-  assert.equal(result.points, 12);
+  assert.equal(result.points, 36);assert.equal(result.scoreMultiplier,3);
   assert.equal(game.remaining, 60);
+  for(const scoreMultiplier of [0,1,-1,NaN,Infinity])assert.throws(()=>createConfig({bonusLetters:{scoreMultiplier}}),/scoreMultiplier/);
 });
-test('gold letters add time after short-word caps, with unchanged scores and no hourglass', () => {
+test('gold doubles short-word scores and retains their ordinary time caps and no pickup drops', () => {
   for (const [word, gold, expected] of [
-    ['CAT',[0],.8], ['CAT',[0,1,2],1], ['SUN',[0],.4],
-    ['QUIZ',[0],4.5], ['QUIZ',[0,3],7], ['QUIZ',[0,1,2,3],7.5],
-    ['ZAX',[0,1,2],2.4], ['JAZZ',[0,1,2,3],9.25],
+    ['CAT',[0],.5], ['CAT',[0,1,2],.5], ['SUN',[0],.3],
+    ['QUIZ',[0],2], ['QUIZ',[0,3],2], ['QUIZ',[0,1,2,3],2],
+    ['ZAX',[0,1,2],.5], ['JAZZ',[0,1,2,3],2],
   ]) {
     const game = create(); spell(game, word, 30000, gold);
     near(game.pendingReward, expected);
     const result = game.submit(30000);
     near(result.reward, expected);
     near(result.bonusReward, expected - game.rewardFor(word));
-    assert.equal(result.points, game.pointsFor(word));
-    assert.equal(game.score, game.pointsFor(word));
+    assert.equal(result.points, game.pointsFor(word)*2);
+    assert.equal(game.score, game.pointsFor(word)*2);
     assert.equal(result.hourglassOffered, false);
   }
 });
-test('short-word gold bonuses honor configurable rates while the round timer still caps at its maximum', () => {
+test('short-word time rewards retain configurable rates independently of gold score', () => {
   const game = create({
     timer: {maxSeconds:60},
-    bonusLetters: {timeMultiplier: 3},
+    bonusLetters: {scoreMultiplier: 3},
     rewards: {secondsPerPoint: 2, threeLetterMultiplier: .2, threeLetterMaxSeconds: .25},
   });
   spell(game, 'CAT', 1000, [0]);
   const result = game.submit(1000);
-  near(result.requestedReward, 2.65);
-  near(result.bonusReward, 2.4);
-  assert.equal(result.reward, 1);
-  assert.equal(game.remaining, 60);
-  assert.equal(result.points, 5);
+  near(result.requestedReward, .25);
+  near(result.bonusReward, 0);
+  assert.equal(result.reward, .25);
+  assert.equal(game.remaining, 59.25);
+  assert.equal(result.points, 15);
 });
 test('clearing, misspelling and repeating gold words never grants extra time or points', () => {
   const game = create();
@@ -151,7 +159,7 @@ test('clearing, misspelling and repeating gold words never grants extra time or 
   const before = game.remaining;
   spell(game, 'CAT', 0, [0, 1, 2]);
   assert.equal(game.submit(0).reason, 'repeat');
-  assert.equal(game.remaining, before - 2);
+  assert.equal(game.remaining, before);
   assert.equal(game.score, 5);
   assert.equal(game.pendingReward, 0);
 });
@@ -159,7 +167,7 @@ test('restart clears effects and bonus metadata', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('smoke', 0); spell(game, 'CAT', 0, [0]);
   game.start(10000);
-  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0 });
+  assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
   assert.deepEqual(game.currentTiles, []);
   assert.equal(game.pendingReward, 0);
   assert.equal(game.timeScale, 1);
@@ -183,7 +191,7 @@ test('legacy grenade flags never add smoke to letters or change their gold rewar
   assert.equal(game.current, 'C');assert.equal(game.effects.smoke, 0);
   assert.equal(game.currentTiles[0].grenade, false);
   spell(game, 'ATCH', 20000);const word = game.submit(20000);
-  assert.equal(word.points, 12);near(word.requestedReward, 18);
+  assert.equal(word.points, 24);near(word.requestedReward, 14.4);
   assert.equal(game.effects.smoke, 0);
 });
 test('misspellings and blanks cannot activate or refresh smoke from old letter flags', () => {

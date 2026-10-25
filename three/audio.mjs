@@ -2,7 +2,7 @@
 // Only unlock(), called from a real input gesture, creates/resumes the context.
 export function createAudio({ effects = false, music = false, haptics = false } = {}) {
   let settings = { effects: Boolean(effects), music: Boolean(music), haptics: Boolean(haptics) };
-  let context, effectsBus, musicBus, active = true, disposed = false;
+  let context, effectsBus, musicBus, active = true, ambientActive = true, disposed = false;
   const voices = new Set();
   const lastPlayed = new Map();
   let ambient = false, lastWordAt = -Infinity, lastWordPriority = -1;
@@ -53,7 +53,7 @@ export function createAudio({ effects = false, music = false, haptics = false } 
     addVoice(frequency * 2, delay, duration * .55, volume * .11, { type: 'triangle', family });
   }
   function syncAmbient() {
-    const shouldPlay = Boolean(!disposed && active && settings.music && context?.state === 'running');
+    const shouldPlay = Boolean(!disposed && active && ambientActive && settings.music && context?.state === 'running');
     if (!shouldPlay) {
       cancelWhere(voice => voice.bus === 'music'); ambient = false; return;
     }
@@ -66,8 +66,9 @@ export function createAudio({ effects = false, music = false, haptics = false } 
   }
   function vibrate(kind, info) {
     if (!settings.haptics || !active || disposed) return;
-    const duration = kind === 'letter' ? 5 : kind === 'word' ? (info.isNew || info.isRecord || info.length >= 5 ? 12 : 8)
-      : kind === 'hourglass' ? 10 : kind === 'penalty' ? 7 : kind === 'grenade' ? 9 : 0;
+    const duration = kind === 'word' ? (info.isNew || info.isRecord || info.length >= 5 ? 12 : 8)
+      : { letter: 5, ui: 4, start: 8, pause: 5, resume: 5, clear: 5, repeat: 4,
+        miss: 3, invalid: 6, gameover: 8, gold: 10, hourglass: 10, fire: 10, penalty: 7, grenade: 9 }[kind] || 0;
     if (duration) try { globalThis.navigator?.vibrate?.(duration); } catch { /* Haptics never gate play. */ }
   }
   function normalize(kind, info) {
@@ -84,7 +85,9 @@ export function createAudio({ effects = false, music = false, haptics = false } 
     vibrate(kind, info);
     if (!settings.effects || context?.state !== 'running') return false;
     const now = context.currentTime;
-    const cooldown = { letter: .025, lowtime: 4, penalty: .12, grenade: .25, hourglass: .2, ui: .06 }[kind] || 0;
+    const cooldown = { letter: .025, lowtime: 4, penalty: .12, grenade: .25, hourglass: .2, fire: .2,
+      ui: .06, start: .25, pause: .1, resume: .1, clear: .08, repeat: .15, miss: .1,
+      invalid: .12, gameover: .5, gold: .12 }[kind] || 0;
     if (now - (lastPlayed.get(kind) ?? -Infinity) < cooldown) return false;
     lastPlayed.set(kind, now);
     try {
@@ -106,11 +109,32 @@ export function createAudio({ effects = false, music = false, haptics = false } 
       if (kind === 'letter' || kind === 'ui') {
         const notes = [261.63, 293.66, 329.63, 392, 440];
         const index = Math.max(0, Math.floor(Number(info.length) || 0)) % notes.length;
-        pluck(kind === 'ui' ? 349.23 : notes[index], 0, .095, .018, 'letter');
+        pluck(kind === 'ui' ? 349.23 : notes[index], 0, .095, .018, kind);
+      } else if (kind === 'start') {
+        [261.63, 329.63, 392, 523.25].forEach((note, index) => pluck(note, index * .055, .18, .023, kind));
+      } else if (kind === 'pause' || kind === 'resume') {
+        const notes = kind === 'pause' ? [392, 293.66] : [293.66, 392];
+        notes.forEach((note, index) => pluck(note, index * .065, .13, .018, kind));
+      } else if (kind === 'clear') {
+        pluck(196, 0, .075, .017, kind); pluck(130.81, .04, .1, .012, kind);
+      } else if (kind === 'repeat') {
+        // A neutral double tap acknowledges a familiar word without an error buzz.
+        pluck(329.63, 0, .1, .016, kind); pluck(329.63, .095, .14, .012, kind);
+      } else if (kind === 'miss') {
+        pluck(196, 0, .065, .011, kind);
+      } else if (kind === 'invalid') {
+        pluck(246.94, 0, .11, .02, kind); pluck(220, .065, .13, .016, kind);
+      } else if (kind === 'gold') {
+        [659.25, 830.61, 987.77].forEach((note, index) => pluck(note, index * .045, .24, .023, kind));
+      } else if (kind === 'gameover') {
+        // A warm resolution invites another try, regardless of the round's score.
+        [523.25, 440, 392, 523.25].forEach((note, index) => pluck(note, index * .085, .25, .022, kind));
       } else if (kind === 'penalty') {
         pluck(220, 0, .13, .025, 'penalty'); pluck(196, .055, .16, .018, 'penalty');
       } else if (kind === 'hourglass') {
         pluck(659.25, 0, .32, .024, 'hourglass'); pluck(523.25, .09, .37, .021, 'hourglass');
+      } else if (kind === 'fire') {
+        [220, 329.63, 493.88].forEach((note,index)=>pluck(note,index*.035,.15,.022,'fire'));
       } else if (kind === 'grenade') {
         addVoice(130.81, 0, .25, .028, { type: 'triangle', family: 'grenade' });
         pluck(174.61, .035, .16, .012, 'grenade');
@@ -152,6 +176,10 @@ export function createAudio({ effects = false, music = false, haptics = false } 
       } catch { return false; }
     },
     play,
+    setAmbientActive(value) {
+      ambientActive = Boolean(value);
+      syncAmbient();
+    },
     setActive(value) {
       const next = Boolean(value);
       if (next === active) return;

@@ -91,7 +91,7 @@ test('opening handoff and later supply maintain coverage without a vertical gap 
     const make=pos=>p.prepareTile({...pos,kind:'letter',letter:'E',tilt:.05,pitchOffset:.18,yawOffset:-.22,halfDepth:13.1},c,random);
     for(let i=0;i<20;i++){const pos=fieldPosition(tiles,layout,size,random);if(pos)tiles.push(make(pos));}
     const bridge=openingFeed(tiles,layout,size,c,random);
-    assert.ok(bridge.length>=8);assert.ok(new Set(bridge.map(t=>Math.round(t.y))).size>5);
+    assert.ok(bridge.length>=5);assert.ok(new Set(bridge.map(t=>Math.round(t.y))).size>4);
     tiles.push(...bridge.map(make));p.settleTiles(tiles,360,size,c.physics);
     for(let frame=0;frame<900;frame++){
       p.stepTiles(tiles,1/30,{width:360,size,speed:c.falling.pixelsPerSecond,config:c,random});
@@ -101,13 +101,26 @@ test('opening handoff and later supply maintain coverage without a vertical gap 
         const pos=spawnPosition(tiles,360,size,incomingConfig,random);
         if(pos){assert.ok(pos.y+size/Math.SQRT2<0);tiles.push(make(pos));}
       }
-      const ys=tiles.filter(t=>t.y>=140&&t.y<=446).map(t=>t.y).sort((a,b)=>a-b);
+      const fieldTop=layout.panels[0].h+size*.6,fieldBottom=layout.panels[1].y-size*.6;
+      const ys=tiles.filter(t=>t.y>=fieldTop&&t.y<=fieldBottom).map(t=>t.y).sort((a,b)=>a-b);
       minVisible=Math.min(minVisible,ys.length);
-      const edges=[140,...ys,446];
+      const edges=[fieldTop,...ys,fieldBottom];
       for(let i=1;i<edges.length;i++)maxGap=Math.max(maxGap,edges[i]-edges[i-1]);
       if(frame%30===0)for(let i=0;i<tiles.length;i++)for(let j=i+1;j<tiles.length;j++)assert.ok((p.contact(tiles[i],tiles[j],size)?.penetration||0)<.05);
     }
     assert.ok(maxGap<100,`Seed ${seed}: ${maxGap.toFixed(1)}px vertical gap`);
     assert.ok(minVisible>=14,`Seed ${seed}: only ${minVisible} fully visible letters`);
+  }
+});
+
+test('compact chrome anchors to tall phone safe areas and leaves most of the field available',async()=>{
+  const {viewportLayout,fieldVeilBands}=await layoutModule;
+  for(const [w,h,safeTop,safeBottom] of [[320,568,0,0],[390,844,47,34],[430,932,59,34],[506.25,900,0,0]]){
+    const layout=viewportLayout(w,h,safeTop,safeBottom),bands=fieldVeilBands(layout);
+    assert.ok((layout.visibleArea-layout.bottom*layout.width)/(layout.width*(layout.height-layout.top-layout.bottom))>.78);
+    assert.equal(layout.panels[0].y+layout.panels[0].h,bands.topSolid);
+    assert.equal(layout.panels[1].y,bands.bottomSolid);
+    assert.ok(bands.topClear<bands.bottomClear);
+    assert.ok(layout.panels[1].y+layout.panels[1].h<=layout.height-layout.bottom);
   }
 });

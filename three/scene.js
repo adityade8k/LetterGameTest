@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
-import { celMaterial, atmosphereMaterial, smokeMaterial } from './materials.js';
+import { celMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, stepIceWave, createIceSnow, stepIceSnow, iceSnowPose, iceSnowMaterial } from './materials.js';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
-import { viewportLayout } from './layout.mjs';
+import { viewportLayout, fieldVeilBands } from './layout.mjs';
 
 function roundedSquare(size) {
   const half = size / 2 - DESIGN.tile.bevel, r = DESIGN.tile.corner;
@@ -31,18 +31,40 @@ export async function createScene(host, config, reducedMotion) {
   const canvas = renderer.domElement;
   canvas.tabIndex = 0; canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-label', 'Loading falling letters');
   host.append(canvas);
-  const font = await new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json');
-  const ui = createUI(font, config, reducedMotion);
+  const [font,uiFont] = await Promise.all([
+    new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json'),
+    new FontLoader().loadAsync('vendor/fonts/fredoka-semibold.typeface.json'),
+  ]);
+  const ui = createUI(uiFont, config, reducedMotion);
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
   camera.position.z = 60;
   let layout;
-  const background = new THREE.Scene(), scene = new THREE.Scene();
+  const background = new THREE.Scene(), scene = new THREE.Scene(), atmosphere = new THREE.Scene();
   const skyMaterial = atmosphereMaterial();
   const sky = new THREE.Mesh(new THREE.PlaneGeometry(360, 640), skyMaterial);
   sky.position.z = -25; background.add(sky);
-  const materials = Object.fromEntries(['cream','plum','gold','mint','letterInk','purpleLetter','blueLetter'].map(key => [key, celMaterial(DESIGN.palette[key], {
-    specularStrength:key==='plum'?0:DESIGN.tile.specularStrength,shininess:DESIGN.tile.shininess,
+  const edgeScene=new THREE.Scene(),edgeMaterial=atmosphereMaterial({veil:true});
+  const edgeVeil=new THREE.Mesh(sky.geometry,edgeMaterial);edgeScene.add(edgeVeil);
+  const taps=[],tapGeometry=new THREE.RingGeometry(5.2,6.8,24);
+  const tapMaterial=new THREE.MeshBasicMaterial({color:DESIGN.palette.plum[0],transparent:true,opacity:.5,depthWrite:false,depthTest:false});
+  const materials = Object.fromEntries(['cream','plum','mint','letterInk','smokeTile','smokeInk','iceInk','fireInk','goldInk'].map(key => [key, celMaterial(DESIGN.palette[key], {
+    specularStrength:key==='plum'||key.endsWith('Ink')?0:DESIGN.tile.specularStrength,shininess:DESIGN.tile.shininess,
   })]));
+  materials.ice=specialTileMaterial('ice',config.tiles.mobileSize);
+  materials.fire=specialTileMaterial('fire',config.tiles.mobileSize);
+  materials.gold=specialTileMaterial('gold',config.tiles.mobileSize);
+  const tintMaterial=iceTintMaterial(),tintGeometry=new THREE.PlaneGeometry(360,640);
+  const frostTint=new THREE.Mesh(tintGeometry,tintMaterial);atmosphere.add(frostTint);
+  const iceWave={progress:0,opacity:0},drawingSize=new THREE.Vector2();
+  let iceTarget=null;
+  const snowFlakes=createIceSnow(),snowState={time:0},snowMaterial=iceSnowMaterial();
+  const snowGeometry=new THREE.BufferGeometry();
+  const snowPositions=new Float32Array(snowFlakes.length*3),snowAlphas=new Float32Array(snowFlakes.length);
+  snowGeometry.setAttribute('position',new THREE.BufferAttribute(snowPositions,3).setUsage(THREE.DynamicDrawUsage));
+  snowGeometry.setAttribute('alpha',new THREE.BufferAttribute(snowAlphas,1).setUsage(THREE.DynamicDrawUsage));
+  snowGeometry.setAttribute('size',new THREE.Float32BufferAttribute(snowFlakes.map(flake=>flake.size),1));
+  const snowPoints=new THREE.Points(snowGeometry,snowMaterial);
+  snowPoints.frustumCulled=false;snowPoints.renderOrder=1;atmosphere.add(snowPoints);
   const geometry = roundedSquare(config.tiles.mobileSize);
   const shadowGeometry = new THREE.PlaneGeometry(80, 80);
   const textCache = new Map();
@@ -77,15 +99,17 @@ export async function createScene(host, config, reducedMotion) {
   }
   function build(tile) {
     const group = new THREE.Group();
-    const body = new THREE.Mesh(geometry, materials[tile.bonus ? 'gold' : 'cream']);
+    const surface=tile.effect==='smoke'?'smokeTile':tile.effect==='hourglass'?'ice':tile.effect==='fire'?'fire':tile.bonus?'gold':'cream';
+    const ink=tile.effect==='smoke'?'smokeInk':tile.effect==='hourglass'?'iceInk':tile.effect==='fire'?'fireInk':tile.bonus?'goldInk':'letterInk';
+    const body = new THREE.Mesh(geometry, materials[surface]);
     group.add(body);
     const front = new THREE.Group();
     {
       // Separate typographic zones: badge row, letter, then point value.
       // Every glyph is fitted by its actual geometry, including wide W/M.
-      if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25,DESIGN.tile.letterDepth,tile.effect==='smoke'?'purpleLetter':tile.effect==='hourglass'?'blueLetter':'letterInk'),face.letter));
-      front.add(placeFace(textMesh(String(tile.blank?0:config.letterPoints[tile.letter]),5.5,.65),face.points));
-      if(tile.bonus)front.add(placeFace(textMesh(`x${config.bonusLetters.timeMultiplier}`,6,.8),face.bonus));
+      if(!tile.blank)front.add(placeFace(textMesh(tile.letter,25,DESIGN.tile.letterDepth,ink),face.letter));
+      front.add(placeFace(textMesh(String(tile.blank?0:config.letterPoints[tile.letter]),5.5,.65,ink),face.points));
+      if(tile.bonus)front.add(placeFace(textMesh(`x${config.bonusLetters.scoreMultiplier}`,6,.8,'goldInk'),face.bonus));
     }
     // Rotate a second face outward so its lettering reads normally from behind.
     // Cloning reuses the cached geometries and materials on both sides.
@@ -128,14 +152,22 @@ export async function createScene(host, config, reducedMotion) {
     const style=getComputedStyle(host);
     layout=viewportLayout(host.clientWidth,host.clientHeight,parseFloat(style.getPropertyValue('--safe-top'))||0,parseFloat(style.getPropertyValue('--safe-bottom'))||0);
     renderer.setSize(host.clientWidth,host.clientHeight,false);
+    renderer.getDrawingBufferSize(drawingSize);snowMaterial.uniforms.pointScale.value=drawingSize.y/layout.height;
+    if(iceTarget){renderer.getDrawingBufferSize(drawingSize);iceTarget.setSize(drawingSize.x,drawingSize.y);}
     camera.left=-layout.width/2;camera.right=layout.width/2;camera.top=layout.height/2;camera.bottom=-layout.height/2;camera.updateProjectionMatrix();
-    sky.scale.set(layout.width/360,layout.height/640,1);ui.resize(layout);
+    sky.scale.set(layout.width/360,layout.height/640,1);
+    frostTint.scale.set(layout.width/360,layout.height/640,1);
+    edgeVeil.scale.copy(sky.scale);edgeMaterial.uniforms.fieldHeight.value=layout.height;
+    const bands=fieldVeilBands(layout);edgeMaterial.uniforms.veilBands.value.set(bands.topSolid,bands.topClear,bands.bottomClear,bands.bottomSolid);
+    ui.resize(layout);
   }
   const observer = new ResizeObserver(resize);
   observer.observe(host);
   resize();
 
   function render(tiles, game, dt, now, hover, view) {
+    const reflectionTime=reducedMotion?0:game.elapsed;
+    materials.ice.uniforms.time.value=reflectionTime;materials.fire.uniforms.time.value=reflectionTime;materials.gold.uniforms.time.value=reflectionTime;
     const visible = new Set(tiles);
     for (const [tile, model] of bodies) if (!visible.has(tile)) removeBody(tile, model);
     for (const tile of tiles) {
@@ -149,7 +181,10 @@ export async function createScene(host, config, reducedMotion) {
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
       if(model.fades.size){
         const opacity=Math.min(1,Math.max(0,(game.elapsed-tile.bornAt)/config.falling.replacementFadeSeconds));
-        for(const material of model.fades.values())material.uniforms.opacity.value=opacity;
+        for(const material of model.fades.values()){
+          material.uniforms.opacity.value=opacity;
+          if(material.uniforms.time)material.uniforms.time.value=reflectionTime;
+        }
         if(opacity>=1){
           const originals=new Map([...model.fades].map(([source,clone])=>[clone,source]));
           model.group.traverse(object=>{if(originals.has(object.material))object.material=originals.get(object.material);});
@@ -172,7 +207,10 @@ export async function createScene(host, config, reducedMotion) {
       transfer.group.rotation.y = transfer.target==='smoke' ? transfer.rotation.y : transfer.rotation.y * (1 - eased);
       transfer.group.rotation.z = transfer.rotation.z * (1 - eased);
       const opacity = 1 - Math.max(0, (progress - .45) / .55);
-      for (const material of transfer.materials) material.uniforms.opacity.value = opacity;
+      for (const material of transfer.materials){
+        material.uniforms.opacity.value = opacity;
+        if(material.uniforms.time)material.uniforms.time.value=reflectionTime;
+      }
     }
     const age = config.smoke.durationSeconds - game.effects.smoke;
     for (const cloud of clouds) {
@@ -183,15 +221,53 @@ export async function createScene(host, config, reducedMotion) {
       cloud.position.set(pose.x-layout.width/2,layout.height/2-pose.y,35);
       cloud.scale.set(pose.diameter*patch.aspect,pose.diameter/patch.aspect,1);
     }
-    skyMaterial.uniforms.time.value = reducedMotion ? 0 : game.elapsed;
+    for(let i=taps.length-1;i>=0;i--){
+      const tap=taps[i];tap.age+=dt;
+      if(tap.age>=.24){tap.mesh.removeFromParent();tap.mesh.material.dispose();taps.splice(i,1);continue;}
+      const t=tap.age/.24;tap.mesh.scale.setScalar(reducedMotion?1:1+t*1.8);tap.mesh.material.opacity=(1-t)*.38;
+    }
+    skyMaterial.uniforms.time.value = edgeMaterial.uniforms.time.value = reducedMotion ? 0 : game.elapsed;
+    stepIceWave(iceWave,{active:game.effects.hourglass>0,paused:game.phase==='paused',reducedMotion,delta:dt});
+    tintMaterial.uniforms.opacity.value=iceWave.opacity;
+    tintMaterial.uniforms.progress.value=iceWave.progress;
+    stepIceSnow(snowState,{visible:iceWave.opacity>0,paused:game.phase==='paused',reducedMotion,delta:dt});
+    if(iceWave.opacity>0){
+      for(let i=0;i<snowFlakes.length;i++){
+        const pose=iceSnowPose(snowFlakes[i],{width:layout.width,height:layout.height,time:snowState.time,progress:iceWave.progress,opacity:iceWave.opacity});
+        snowPositions[i*3]=pose.x-layout.width/2;snowPositions[i*3+1]=pose.y-layout.height/2;
+        snowAlphas[i]=pose.alpha;
+      }
+      snowGeometry.attributes.position.needsUpdate=true;snowGeometry.attributes.alpha.needsUpdate=true;
+    }
+    // Allocate the extra color pass only during ice and its short release.
+    // UI never enters this target, so it retains its normal colors and contrast.
+    if(iceWave.opacity>0&&!iceTarget){
+      renderer.getDrawingBufferSize(drawingSize);
+      iceTarget=new THREE.WebGLRenderTarget(drawingSize.x,drawingSize.y,{samples:4});
+      tintMaterial.uniforms.source.value=iceTarget.texture;
+    }else if(iceWave.opacity===0&&iceTarget){
+      iceTarget.dispose();iceTarget=null;tintMaterial.uniforms.source.value=null;
+    }
+    renderer.setRenderTarget(iceTarget);
     renderer.setScissorTest(false); renderer.clear(); renderer.render(background, camera);
     renderer.clearDepth();
     renderer.render(scene,camera);
+    if(game.phase!=='ready')renderer.render(edgeScene,camera);
+    if(iceTarget){renderer.setRenderTarget(null);renderer.clear();renderer.render(atmosphere,camera);}
     ui.sync(game, view); ui.animate(now,dt,game);
     renderer.clearDepth(); renderer.render(ui.scene, camera);
   }
   return {
     canvas, render, ui,
+    tapFeedback(clientX,clientY){
+      const rect=canvas.getBoundingClientRect();
+      const x=(clientX-rect.left)/rect.width*layout.width-layout.width/2;
+      const y=layout.height/2-(clientY-rect.top)/rect.height*layout.height;
+      const mesh=new THREE.Mesh(tapGeometry,tapMaterial.clone());mesh.position.set(x,y,40);
+      // Decorative only: the ripple never participates in raycasting.
+      ui.scene.add(mesh);taps.push({mesh,age:0});
+      if(taps.length>6){const oldest=taps.shift();oldest.mesh.removeFromParent();oldest.mesh.material.dispose();}
+    },
     get layout(){return layout;},
     setReducedMotion(value) {
       reducedMotion = Boolean(value);
@@ -205,7 +281,8 @@ export async function createScene(host, config, reducedMotion) {
       raycaster.setFromCamera(pointer, camera);
       const action = ui.hit(raycaster);
       if (action) return { action };
-      if (ui.obscures(x,y))return null;
+      const bands=fieldVeilBands(layout);
+      if(ui.obscures(x,y)||y<=bands.topSolid||y>=bands.bottomSolid)return null;
       const hits = raycaster.intersectObjects([...bodies.values()].map(model => model.group), true);
       for (const hit of hits) { let obj = hit.object; while (obj && !obj.userData.tile) obj = obj.parent; if (obj) return { tile: obj.userData.tile }; }
       return null;
@@ -249,6 +326,8 @@ export async function createScene(host, config, reducedMotion) {
         scene.add(cloud);clouds.push(cloud);
       }
     },
-    reset() { ui.reset();clearTransfers();for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
+    // Retain the current ice mix: when the engine clears its effect, the next
+    // frames dissolve it gently even if the round ended or was restarted.
+    reset() { for(const tap of taps){tap.mesh.removeFromParent();tap.mesh.material.dispose();}taps.length=0;ui.reset();clearTransfers();for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
   };
 }
