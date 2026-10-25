@@ -149,7 +149,7 @@ function handle(result){
     const reason={clear:'Word cleared',timeout:'Word incomplete',spelling:'No matching word',incomplete:'Word incomplete'}[result.reason];
     feedback(`${reason} / -${format(result.penalty)}s`,'bad');sound(result.reason==='clear'?'clear':'invalid');
   }else if(result.type==='effect'){
-    if(result.effect==='smoke'){scene.releaseSmoke();feedback('Smoke!','smoke');sound('grenade');}
+    if(result.effect==='smoke'){scene.releaseSmoke(result.origin);feedback('Smoke!','smoke');sound('grenade');}
     else{view.feedback='';view.feedbackKind='';feedbackUntil=0;sound(result.effect==='fire'?'fire':'hourglass');}
   }
   else if(result.type==='letter')sound('letter',{length:game.current.length});
@@ -165,7 +165,7 @@ function pick(tile){
     tiles=tiles.filter(item=>item!==tile);scene.burst(tile,{target:'tray',index:Math.max(0,game.current.length-1)});hover=null;
     if(tile.kind==='letter'&&game.phase==='running')refills.picked();
   }
-  handle(result);if(result.tileEffect)handle({type:'effect',...result.tileEffect});refillChoices(true);updateLabel();
+  handle(result);if(result.tileEffect)handle({type:'effect',...result.tileEffect,origin:{x:tile.x,y:tile.y}});refillChoices(true);updateLabel();
 }
 function sync(){
   audio.setActive(!document.hidden);

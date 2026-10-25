@@ -58,7 +58,22 @@ test('smoke matches its tile and the ice compositor uses a blue-to-white palette
   smoke.dispose();ice.dispose();
 });
 
-test('ice rises over 1.2 active seconds, freezes when paused, and refreshing it never restarts the wave',supported,async()=>{
+test('gas tile pulses have independent materials while aura and clouds keep the same magenta hue',supported,async()=>{
+  const [{gasTileMaterial,gasAuraMaterial,smokeMaterial},{DESIGN}]=await Promise.all([import('../three/materials.js'),import('../three/design.js')]);
+  const body=gasTileMaterial(),second=body.clone(),aura=gasAuraMaterial(),cloud=smokeMaterial();
+  second.uniforms.pulse.value=1;second.uniforms.opacity.value=.4;
+  assert.equal(body.uniforms.pulse.value,0,'one tile cannot synchronize the others');
+  assert.equal(body.uniforms.opacity.value,1,'spawn fading stays local to its tile');
+  assert.equal(`#${body.uniforms.lightTone.value.getHexString()}`,DESIGN.palette.smokeTile[0]);
+  assert.equal(`#${aura.uniforms.tint.value.getHexString()}`,DESIGN.palette.smokeTile[0]);
+  assert.equal(`#${cloud.uniforms.tint.value.getHexString()}`,DESIGN.palette.smokeTile[0]);
+  assert.equal(aura.depthWrite,false);assert.equal(aura.depthTest,true,'the aura stays behind the tile face');
+  assert.equal(cloud.uniforms.dissolve.value,0);
+  const puff=cloud.clone();puff.uniforms.dissolve.value=.5;assert.equal(cloud.uniforms.dissolve.value,0);
+  for(const material of [body,second,aura,cloud,puff])material.dispose();
+});
+
+test('ice rises over 1.2 active seconds, freezes when paused, and active frames preserve the wave',supported,async()=>{
   const {stepIceWave}=await import('../three/materials.js');
   const state={progress:0,opacity:0};
   stepIceWave(state,{active:true,delta:.3});
@@ -66,7 +81,7 @@ test('ice rises over 1.2 active seconds, freezes when paused, and refreshing it 
   stepIceWave(state,{active:true,paused:true,delta:10});
   assert.equal(state.progress,.25,'pause must not finish the reveal');
   stepIceWave(state,{active:true,delta:.3});
-  assert.equal(state.progress,.5,'a refreshed pickup keeps its existing reveal');
+  assert.equal(state.progress,.5,'continued active frames keep the existing reveal');
   stepIceWave(state,{active:true,delta:.6});
   assert.equal(state.progress,1);
   stepIceWave(state,{active:true,delta:10});
@@ -84,6 +99,17 @@ test('ice dissolves in half a second after expiry or an early reset, then the ne
   assert.deepEqual(state,{progress:0,opacity:0});
   stepIceWave(state,{active:true,delta:.12});
   assert.ok(Math.abs(state.progress-.1)<1e-9);assert.equal(state.opacity,1);
+});
+
+test('a newly accepted gas or fire effect clears an unfinished ice dissolve immediately',supported,async()=>{
+  const {stepIceWave}=await import('../three/materials.js');
+  const state={progress:1,opacity:1};
+  stepIceWave(state,{active:false,delta:.2});
+  assert.ok(state.opacity>0&&state.opacity<1,'ordinary ice expiry still dissolves gently');
+  stepIceWave(state,{active:false,interrupted:true,delta:0});
+  assert.deepEqual(state,{progress:0,opacity:0},'the incoming effect cannot inherit blue tint or snow');
+  stepIceWave(state,{active:true,delta:.12});
+  assert.ok(Math.abs(state.progress-.1)<1e-9,'the next ice pickup starts a fresh rising wave');
 });
 
 test('reduced motion uses a static full-field ice palette and invalid frame deltas cannot move the wave',supported,async()=>{

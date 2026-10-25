@@ -174,7 +174,7 @@ test('help describes staged gold, ice, smoke and fire tile introductions',suppor
   assert.match(description,/Gold tiles first appear after 3 words/);
   assert.match(description,/Magenta smoke tiles appear after 10 words/);
   assert.match(description,/Fire tiles appear after 12 words.*2 times faster for 5 seconds/);
-  assert.match(description,/Ice and fire replace each other/);
+  assert.match(description,/Only one timed effect can run at once/);
   assert.match(description,/double.*word score/);
 });
 

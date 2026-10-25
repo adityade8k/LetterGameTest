@@ -98,13 +98,13 @@ test('gold collection feedback fires for a consumed tile and does not leak throu
  const ending=make();ending.remaining=1;const result=ending.select('Z',0,{bonus:true});assert.equal(result.ended,true);assert.equal(result.goldCollected,undefined);
 });
 
-test('blue letters slow both clocks; purple smoke can coexist, refresh, pause and reset',()=>{
+test('blue letters slow both clocks and suppress smoke letters through pause until expiry',()=>{
  const game=make();game.select('C',0,{effect:'hourglass'});game.advance(1000);
  near(game.remaining,59.6);near(game.letterSeconds,1.6);
- game.select('A',1000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,6.5);
- game.select('T',2000,{effect:'smoke'});near(game.effects.smoke,5);near(game.effects.hourglass,5.5);
- game.pause(2000);game.advance(100000);near(game.effects.smoke,5);near(game.effects.hourglass,5.5);
- game.resume(100000);game.advance(103000);near(game.effects.hourglass,2.5);near(game.effects.smoke,2);
+ assert.equal(game.select('A',1000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,6.5);
+ assert.equal(game.select('T',2000,{effect:'smoke'}).tileEffect,undefined);near(game.effects.smoke,0);near(game.effects.hourglass,5.5);
+ game.pause(2000);game.advance(100000);near(game.effects.smoke,0);near(game.effects.hourglass,5.5);
+ game.resume(100000);game.advance(103000);near(game.effects.hourglass,2.5);near(game.effects.smoke,0);
  game.advance(105500);near(game.effects.hourglass,0);near(game.effects.smoke,0);
  game.start(200000);assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:0});
 });

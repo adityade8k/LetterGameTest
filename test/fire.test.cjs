@@ -67,26 +67,26 @@ test('one long frame and many small frames agree through fire, automatic scoring
   assert.deepEqual(large.effects,small.effects);assert.equal(large.timeScale,1);
 });
 
-test('the latest consumed ice or fire letter wins while smoke keeps its independent lifetime',()=>{
-  const game=make();game.activate('smoke',0);game.select('C',0,{effect:'hourglass'});
+test('ice keeps its original lifetime when later fire or ice letters are collected',()=>{
+  const game=make();game.select('C',0,{effect:'hourglass'});
   assert.equal(game.timeScale,.4);
-  game.select('A',1000,{effect:'fire'});
-  assert.equal(game.timeScale,2);near(game.effects.hourglass,0);near(game.effects.fire,5);near(game.effects.smoke,4);
-  game.select('T',1500,{effect:'hourglass'});
+  assert.equal(game.select('A',1000,{effect:'fire'}).tileEffect,undefined);
+  assert.equal(game.timeScale,.4);near(game.effects.hourglass,6.5);near(game.effects.fire,0);near(game.effects.smoke,0);
+  assert.equal(game.select('T',1500,{effect:'hourglass'}).tileEffect,undefined);
   assert.equal(game.current,'CAT');assert.equal(game.timeScale,.4);near(game.effects.fire,0);
-  near(game.effects.hourglass,7.5);near(game.effects.smoke,3.5);near(game.remaining,58.6);
+  near(game.effects.hourglass,6);near(game.effects.smoke,0);near(game.remaining,59.4);
   game.submit(1500);game.advance(5000);
-  near(game.effects.smoke,0);near(game.effects.hourglass,4);near(game.effects.fire,0);
+  near(game.effects.smoke,0);near(game.effects.hourglass,2.5);near(game.effects.fire,0);
 });
 
-test('pausing freezes fire and smoke, refresh replaces the duration, and restart clears both',()=>{
-  const game=make();game.activate('hourglass',0);game.activate('fire',0);game.activate('smoke',0);
+test('pausing freezes fire, extra activations cannot refresh it, and restart clears it',()=>{
+  const game=make();game.activate('fire',0);game.activate('hourglass',0);game.activate('smoke',0);
   assert.equal(game.effects.hourglass,0);game.pause(2000);game.advance(100000);
   assert.equal(game.activate('hourglass',100000).type,'ignored');
-  assert.deepEqual(game.effects,{hourglass:0,smoke:3,fire:3});near(game.remaining,56);
+  assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:3});near(game.remaining,56);
   game.resume(100000);game.advance(101000);game.activate('fire',101000);
-  near(game.effects.fire,5);near(game.effects.smoke,2);assert.equal(game.timeScale,2);
-  game.advance(106000);near(game.effects.fire,0);near(game.effects.smoke,0);near(game.remaining,44);
+  near(game.effects.fire,2);near(game.effects.smoke,0);assert.equal(game.timeScale,2);
+  game.advance(106000);near(game.effects.fire,0);near(game.effects.smoke,0);near(game.remaining,47);
   game.activate('fire',106000);game.start(200000);
   assert.deepEqual(game.effects,{hourglass:0,smoke:0,fire:0});assert.equal(game.timeScale,1);near(game.remaining,60);
 });

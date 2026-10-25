@@ -28,11 +28,11 @@ test('a frame crossing effect expiry drains both slow and normal time accurately
   near(game.elapsed, 8);
   assert.equal(game.effects.hourglass, 0);
 });
-test('smoke expires after five active seconds while ice lasts 7.5 seconds when combined', () => {
+test('ice suppresses a smoke pickup and keeps its 7.5-second lifetime', () => {
   const game = create();
-  game.activate('hourglass', 0); game.activate('smoke', 0);
+  game.activate('hourglass', 0); assert.equal(game.activate('smoke', 0).type, 'ignored');
   game.advance(4000);
-  near(game.effects.smoke, 1);
+  near(game.effects.smoke, 0);
   near(game.effects.hourglass, 3.5);
   game.advance(5000);
   assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
@@ -41,12 +41,12 @@ test('smoke expires after five active seconds while ice lasts 7.5 seconds when c
   assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
   near(game.remaining, 57);
 });
-test('pause freezes both effects; resume uses only active time', () => {
+test('pause freezes the active effect; suppressed effects stay off after resume', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('smoke', 0);
   game.pause(2000); game.advance(100000);
   assert.equal(game.activate('smoke', 100000).type, 'ignored');
-  near(game.effects.hourglass, 5.5); near(game.effects.smoke, 3);
+  near(game.effects.hourglass, 5.5); near(game.effects.smoke, 0);
   game.resume(100000); game.advance(103000);
   assert.deepEqual(game.effects, { hourglass: 2.5, smoke: 0, fire: 0 });
   near(game.remaining, 58);
@@ -55,13 +55,13 @@ test('pause freezes both effects; resume uses only active time', () => {
   assert.deepEqual(game.effects, { hourglass: 0, smoke: 0, fire: 0 });
   near(game.remaining, 57);near(game.elapsed, 7.5);
 });
-test('a second pickup refreshes duration instead of stacking speed multipliers', () => {
+test('a second pickup cannot refresh or extend the active duration', () => {
   const game = create();
   game.activate('hourglass', 0); game.activate('hourglass', 4000);
-  assert.equal(game.effects.hourglass, 7.5);
+  assert.equal(game.effects.hourglass, 3.5);
   assert.equal(game.timeScale, .4);
   game.advance(11500);
-  near(game.remaining, 55.4);
+  near(game.remaining, 53);
   assert.equal(game.timeScale, 1);
 });
 test('effects preserve the pending word, bonus letters and points', () => {
@@ -262,11 +262,13 @@ test('smoke forms and dissolves at its anchor with only a few pixels of drift',(
           const settings={...s,driftPixelsPerSecond};
           const pose=smokePose(patch,age,remaining,width,height,settings);
           assert.ok(Math.hypot(pose.x-patch.x*width,pose.y-patch.y*height)<5);
-          near(pose.diameter,start.diameter);
+          const fullDiameter=Math.min(width,height)*patch.radius*2;
+          assert.ok(pose.diameter>=fullDiameter*.88-1e-8&&pose.diameter<=fullDiameter+1e-8);
+          if(age>=1)near(pose.diameter,fullDiameter);
           near(pose.opacity,smokeEnvelope(age,remaining,s,patch.delay));
           const reduced=smokePose(patch,age,remaining,width,height,settings,true);
           near(reduced.x,patch.x*width);near(reduced.y,patch.y*height);
-          near(reduced.opacity,pose.opacity);near(reduced.diameter,pose.diameter);
+          near(reduced.opacity,pose.opacity);near(reduced.diameter,fullDiameter);
           if(driftPixelsPerSecond===0){near(pose.x,reduced.x);near(pose.y,reduced.y);}
         }
       }
@@ -274,11 +276,11 @@ test('smoke forms and dissolves at its anchor with only a few pixels of drift',(
   }
 });
 
-test('anchored smoke freezes during pause and still dissolves on active time with hourglass',()=>{
+test('anchored smoke freezes during pause and dissolves on active time while blocking ice',()=>{
   const game=create(),s=createConfig().smoke;
   const patch=smokePatches(390,500,s,seededRandom(12))[0];
   const pose=()=>smokePose(patch,s.durationSeconds-game.effects.smoke,game.effects.smoke,390,500,s);
-  game.activate('hourglass',0);game.activate('smoke',0);
+  game.activate('smoke',0);assert.equal(game.activate('hourglass',0).type,'ignored');
   game.pause(2000);
   const frozen=pose();
   game.advance(100000);assert.deepEqual(pose(),frozen);assert.equal(frozen.opacity,1);

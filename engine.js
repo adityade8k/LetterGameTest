@@ -121,6 +121,7 @@
       return this.isRepeat ? 0 : this.timeForPoints(this.pendingBasePoints, this.current.length);
     }
     get hasBonus() { return this.currentTiles.some(tile => tile.bonus); }
+    get activeEffect() { return ['hourglass', 'smoke', 'fire'].find(effect => this.effects[effect] > 0) || null; }
     get timeScale() { return this.effects.fire > 0 ? this.config.fire.timeScale : this.effects.hourglass > 0 ? this.config.hourglass.timeScale : 1; }
     get isWord() { return this.currentPrefixes.some(word=>this.dictionary.has(word)); }
     get isRepeat() { return this.isWord && this.currentPrefixes.filter(word=>this.dictionary.has(word)).every(word=>this.used.has(word)); }
@@ -172,9 +173,10 @@
       // Both countdowns spend the same scaled time; the combo and effect
       // durations continue to use real active seconds.
       if (this.current) this.letterSeconds = Math.max(0, this.letterSeconds - Math.min(drain, this.remaining));
-      this.effects.hourglass = Math.max(0, this.effects.hourglass - activeSeconds);
-      this.effects.smoke = Math.max(0, this.effects.smoke - activeSeconds);
-      this.effects.fire = Math.max(0, this.effects.fire - activeSeconds);
+      for (const effect of ['hourglass', 'smoke', 'fire']) {
+        const remaining = this.effects[effect] - activeSeconds;
+        this.effects[effect] = remaining <= 1e-9 ? 0 : remaining;
+      }
       this.remaining = Math.max(0, this.remaining - drain);
       if (this.remaining === 0) { this.phase = 'over'; this.clearEffects(); return { type: 'ended' }; }
       return null;
@@ -182,9 +184,9 @@
     discardHourglass() { this.hourglassOffer = false; }
     clearEffects() { this.effects.hourglass = 0; this.effects.smoke = 0; this.effects.fire = 0; this.discardHourglass(); this.resetCombo(); }
     applyEffect(effect) {
-      // Temperature effects replace one another; smoke remains independent.
-      if (effect === 'hourglass') this.effects.fire = 0;
-      if (effect === 'fire') this.effects.hourglass = 0;
+      // One timed effect owns the field until it expires. Extra colored tiles
+      // still supply letters, but cannot replace, refresh, or queue an effect.
+      if (this.phase !== 'running' || !['hourglass', 'smoke', 'fire'].includes(effect) || this.activeEffect) return 0;
       this.effects[effect] = this.config[effect].durationSeconds;
       if (effect === 'hourglass') this.discardHourglass();
       return this.effects[effect];
@@ -193,15 +195,15 @@
       const end = this.advance(now);
       if (end) return end;
       if (this.phase !== 'running' || !['hourglass', 'smoke', 'fire'].includes(effect)) return { type: 'ignored' };
-      // A second pickup refreshes the effect; it never multiplies its strength.
       const duration = this.applyEffect(effect);
-      return { type: 'effect', effect, duration };
+      return duration ? { type: 'effect', effect, duration } : { type: 'ignored' };
     }
     collectHourglass(now) { return this.collectPickup('hourglass', now); }
     collectPickup(effect, now) {
       const end = this.advance(now);
       if (end) return { ...end, consumed: false };
-      if (this.phase !== 'running' || !this.hourglassOffer || !['hourglass', 'smoke'].includes(effect)) return { type: 'ignored' };
+      if (this.phase !== 'running' || !this.hourglassOffer || !['hourglass', 'smoke', 'fire'].includes(effect)) return { type: 'ignored' };
+      if (this.activeEffect) { this.discardHourglass(); return { type: 'ignored' }; }
       const result = this.activate(effect, now);
       if (result.type === 'effect') { this.discardHourglass(); result.consumed = true; }
       return result;
@@ -226,7 +228,8 @@
       this.letterSeconds = this.letterWindow;
       const result = next.length ? { type: 'letter', word: this.current } : this.penalize('spelling');
       if(effect&&this.phase==='running'){
-        result.tileEffect={effect,duration:this.applyEffect(effect)};
+        const duration=this.applyEffect(effect);
+        if(duration)result.tileEffect={effect,duration};
       }
       if(bonus&&this.phase==='running')result.goldCollected=true;
       return result;

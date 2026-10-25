@@ -87,13 +87,13 @@ test('catching an hourglass mid-word stretches the remaining window without rese
   }
 });
 
-test('a refreshed hourglass extends slow word formation while keeping the five-second budget',()=>{
+test('a suppressed second hourglass cannot extend the slow word deadline',()=>{
   const game=createFiveSecondFixture();game.activate('hourglass',0);for(const l of 'CAT')game.select(l,0);
   game.advance(4000);near(game.letterSeconds,3.4);
-  game.activate('hourglass',4000);game.advance(9000);
-  near(game.letterSeconds,1.4);assert.equal(game.current,'CAT');assert.equal(game.effects.hourglass,0);
-  assert.equal(game.advance(10399),null);
-  assert.equal(game.advance(10400).word,'CAT');near(game.remaining,55.5);
+  assert.equal(game.activate('hourglass',4000).type,'ignored');game.advance(5000);
+  near(game.letterSeconds,3);assert.equal(game.current,'CAT');assert.equal(game.effects.hourglass,0);
+  assert.equal(game.advance(7999),null);
+  assert.equal(game.advance(8000).word,'CAT');near(game.remaining,55.5);
 });
 
 test('pause preserves both the hourglass and slowed letter countdown',()=>{

@@ -19,8 +19,9 @@
     }
     return best;
   }
-  function smokePatches(width, height, settings, random = Math.random) {
+  function smokePatches(width, height, settings, random = Math.random, origin = null) {
     const patches=[],short=Math.min(width,height);
+    const hasOrigin=Number.isFinite(origin?.x)&&Number.isFinite(origin?.y);
     // Give each cloud a different size band, then shuffle the bands so the
     // largest obstruction does not keep occupying the first sampled location.
     const sizeBands=Array.from({length:settings.patchCount},(_,index)=>index);
@@ -39,13 +40,18 @@
         if(nearest>clearance){best=candidate;clearance=nearest;}
         if(nearest>=settings.radiusFraction*1.5)break;
       }
+      if(index===0&&hasOrigin){
+        best={x:Math.max(.14,Math.min(.86,origin.x/width)),y:Math.max(.20,Math.min(.74,origin.y/height))};
+      }
       patches.push({...best,radius,phase:random()*Math.PI*2,
-        seed:random()*1000+index*.731,aspect:.73+random()*.62,delay:random()*.12});
+        seed:random()*1000+index*.731,aspect:.73+random()*.62,delay:index===0&&hasOrigin?0:random()*.12});
     }
     return patches;
   }
   function smokePose(patch,age,remaining,width,height,settings,reducedMotion=false){
-    const localAge=Math.max(0,age-patch.delay),diameter=Math.min(width,height)*patch.radius*2;
+    const localAge=Math.max(0,age-patch.delay),baseDiameter=Math.min(width,height)*patch.radius*2;
+    const smooth=value=>{const t=Math.min(1,Math.max(0,value));return t*t*(3-2*t);};
+    const bloom=reducedMotion?1:.88+.12*smooth(localAge/.75);
     // Drift is a tiny orbit around the anchor, never velocity accumulated over
     // the effect's lifetime. Even aggressive tuning cannot sweep a cloud away.
     const drift=reducedMotion?0:Math.min(4,Math.max(0,settings.driftPixelsPerSecond));
@@ -54,8 +60,9 @@
     return {
       x:patch.x*width+dx,
       y:patch.y*height+dy,
-      diameter,
+      diameter:baseDiameter*bloom,
       opacity:smokeEnvelope(age,remaining,settings,patch.delay),localAge,
+      dissolve:settings.fadeOutSeconds>0?smooth(1-remaining/settings.fadeOutSeconds):0,
     };
   }
   function smokeEnvelope(age,remaining,settings,delay=0){
@@ -65,5 +72,10 @@
     const fadeOut=settings.fadeOutSeconds>0?smooth(remaining/settings.fadeOutSeconds):1;
     return settings.opacity*fadeIn*fadeOut;
   }
-  return { hourglassPosition, smokePatches, smokeEnvelope, smokePose };
+  function gasPulse(elapsed,phase=0,{blocked=false,reducedMotion=false}={}){
+    if(blocked||reducedMotion)return 0;
+    const breath=.5+.5*Math.sin(Math.max(0,elapsed)*2.35+phase);
+    return breath*breath;
+  }
+  return { hourglassPosition, smokePatches, smokeEnvelope, smokePose, gasPulse };
 });

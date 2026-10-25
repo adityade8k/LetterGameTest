@@ -35,6 +35,48 @@ export function celMaterial(tones,{specularStrength=0,shininess=56}={}) {
   });
 }
 
+// The warning breath changes only surface light: tile size, ink and collision
+// geometry stay steady. Each gas tile owns its pulse uniform independently.
+export function gasTileMaterial(){
+  return new THREE.ShaderMaterial({
+    uniforms:{
+      lightTone:{value:new THREE.Color(DESIGN.palette.smokeTile[0])},
+      shadeTone:{value:new THREE.Color(DESIGN.palette.smokeTile[1])},
+      lightDirection:{value:new THREE.Vector3(...DESIGN.cel.light).normalize()},
+      threshold:{value:DESIGN.cel.threshold},pulse:{value:0},opacity:{value:1},
+    },
+    vertexShader:`varying vec3 vNormal,vObjectNormal;
+      void main(){vNormal=normalize(mat3(modelMatrix)*normal);vObjectNormal=normal;
+        gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader:`varying vec3 vNormal,vObjectNormal;uniform vec3 lightTone,shadeTone,lightDirection;
+      uniform float threshold,pulse,opacity;
+      void main(){
+        float band=step(threshold,dot(normalize(vNormal),lightDirection));
+        float bevel=smoothstep(.02,.6,1.-abs(normalize(vObjectNormal).z));
+        vec3 col=mix(shadeTone,lightTone,band);
+        col=mix(col,lightTone*1.35,pulse*(.28+.32*bevel));
+        gl_FragColor=vec4(col,opacity);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
+export function gasAuraMaterial(){
+  return new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
+    uniforms:{tint:{value:new THREE.Color(DESIGN.palette.smoke)},opacity:{value:0}},
+    vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+    fragmentShader:`varying vec2 vUv;uniform vec3 tint;uniform float opacity;
+      void main(){
+        vec2 q=abs((vUv-.5)*2.)-vec2(.62);
+        float edge=length(max(q,0.))+min(max(q.x,q.y),0.)-.18;
+        float glow=exp(-max(0.,edge)*10.)*smoothstep(-.09,.04,edge);
+        gl_FragColor=vec4(tint,glow*opacity);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
 // Faux glass and metal share the existing rounded geometry: no texture fetches,
 // refraction pass or alpha sorting. Object-space gradients work on both faces;
 // normals give the bevel its own bright rim as a tile turns.
@@ -132,8 +174,9 @@ export function iceTintMaterial(){
 }
 
 // Seconds here are real active seconds, independent of the slowed game clock.
-// Refreshing a pickup extends its duration without sending the wave backwards.
-export function stepIceWave(state,{active,paused=false,reducedMotion=false,delta=0}){
+// Continuing active frames preserve the rising wave; blocked pickups never restart it.
+export function stepIceWave(state,{active,paused=false,reducedMotion=false,interrupted=false,delta=0}){
+  if(interrupted){state.opacity=0;state.progress=0;return state;}
   if(paused)return state;
   const dt=Number.isFinite(delta)?Math.max(0,delta):0;
   if(active){
@@ -225,9 +268,14 @@ export function atmosphereMaterial({veil=false}={}) {
 export function smokeMaterial() {
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, depthTest: false,
-    uniforms: { tint: { value: new THREE.Color(DESIGN.palette.smoke) }, opacity: { value: 1 }, seed:{value:0}, time:{value:0} },
+    uniforms: {
+      tint:{value:new THREE.Color(DESIGN.palette.smoke)},
+      shade:{value:new THREE.Color(DESIGN.palette.smokeTile[1])},
+      highlight:{value:new THREE.Color(DESIGN.palette.smoke).lerp(new THREE.Color(DESIGN.palette.smokeInk[0]),.22)},
+      opacity:{value:1},seed:{value:0},time:{value:0},dissolve:{value:0},
+    },
     vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-    fragmentShader: `varying vec2 vUv; uniform vec3 tint; uniform float opacity,seed,time;
+    fragmentShader: `varying vec2 vUv; uniform vec3 tint,shade,highlight; uniform float opacity,seed,time,dissolve;
       float hash(float n){return fract(sin(n*127.1+seed*311.7)*43758.5453);}
       float noise(vec2 p){
         vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
@@ -245,6 +293,11 @@ export function smokeMaterial() {
         vec2 core=(vec2(hash(2.),hash(3.))-.5)*.13;
         vec2 coreShape=vec2(.88+hash(4.)*.25,.86+hash(5.)*.28);
         float edge=length((p-core)/coreShape)-(.43+hash(6.)*.07);
+        vec2 coreDelta=(p-core)/(coreShape*.48);
+        float corePuff=exp(-dot(coreDelta,coreDelta)*1.6);
+        vec2 slope=coreDelta*corePuff*2.;
+        vec2 coreCrest=coreDelta-vec2(-.15,.18);
+        float crest=exp(-dot(coreCrest,coreCrest)*2.2);
         float lobeCount=5.+floor(hash(7.)*5.);
         for(int i=0;i<9;i++){
           float n=float(i);
@@ -254,13 +307,28 @@ export function smokeMaterial() {
             vec2 center=vec2(cos(angle),sin(angle))*reach+core*.5;
             float radius=.22+hash(n+60.)*.14+sin(time*.55+n+seed)*.009;
             edge=unionCloud(edge,length(p-center)-radius);
+            vec2 delta=(p-center)/radius;
+            float puff=exp(-dot(delta,delta)*1.65);
+            slope+=delta*puff*1.4;
+            vec2 cap=delta-vec2(-.12,.15);
+            crest=max(crest,exp(-dot(cap,cap)*2.2));
           }
         }
-        float billow=noise(p*(3.2+hash(9.)*1.5)+vec2(time*.045,-time*.035));
-        edge+=(billow-.5)*.055+(1.-opacity)*(.10+billow*.055);
-        float alpha=(1.-smoothstep(-.13,.025,edge))*opacity;
-        float light=clamp(.46+.25*p.y+.29*billow,0.,1.);
-        vec3 col=tint*(.88+.18*light);
+        float billow=noise(p*(3.2+hash(9.)*1.5)+vec2(time*.035,-time*.025));
+        float detail=noise(p*7.8+vec2(-time*.019,time*.028)+seed*.013);
+        edge+=(billow-.5)*.065+(detail-.5)*.025+dissolve*(.13+detail*.22);
+        float body=1.-smoothstep(-.15,.045,edge);
+        // A thin, uneven outer veil supplies wisps without moving the anchor
+        // or extending the obstruction's original size budget.
+        float wisp=(1.-smoothstep(-.02,.18,edge))*smoothstep(.25,.76,detail)*.24;
+        float alpha=max(body,wisp)*opacity;
+        // Rounded lobe normals and broad pink crests give each puff volume;
+        // darker magenta pockets keep the average hue close to the gas tile.
+        vec3 normal=normalize(vec3(slope*.85,.62));
+        float diffuse=dot(normal,normalize(vec3(-.55,.8,.9)))*.5+.5;
+        float light=clamp(diffuse*.55+crest*.35+billow*.10,0.,1.);
+        vec3 col=mix(shade,tint,smoothstep(.15,.62,light));
+        col=mix(col,highlight,smoothstep(.56,.94,light)*.85);
         gl_FragColor=vec4(col,alpha);
         #include <colorspace_fragment>
       }`,

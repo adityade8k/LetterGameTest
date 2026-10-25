@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { DESIGN } from './design.js';
-import { celMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, stepIceWave, createIceSnow, stepIceSnow, iceSnowPose, iceSnowMaterial } from './materials.js';
+import { celMaterial, gasTileMaterial, gasAuraMaterial, specialTileMaterial, atmosphereMaterial, smokeMaterial, iceTintMaterial, stepIceWave, createIceSnow, stepIceSnow, iceSnowPose, iceSnowMaterial } from './materials.js';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout, fieldVeilBands } from './layout.mjs';
@@ -47,10 +47,11 @@ export async function createScene(host, config, reducedMotion) {
   const edgeVeil=new THREE.Mesh(sky.geometry,edgeMaterial);edgeScene.add(edgeVeil);
   const taps=[],tapGeometry=new THREE.RingGeometry(5.2,6.8,24);
   const tapMaterial=new THREE.MeshBasicMaterial({color:DESIGN.palette.plum[0],transparent:true,opacity:.5,depthWrite:false,depthTest:false});
-  const materials = Object.fromEntries(['cream','plum','mint','letterInk','smokeTile','smokeInk','iceInk','fireInk','goldInk'].map(key => [key, celMaterial(DESIGN.palette[key], {
+  const materials = Object.fromEntries(['cream','plum','mint','letterInk','smokeInk','iceInk','fireInk','goldInk'].map(key => [key, celMaterial(DESIGN.palette[key], {
     specularStrength:key==='plum'||key.endsWith('Ink')?0:DESIGN.tile.specularStrength,shininess:DESIGN.tile.shininess,
   })]));
   materials.ice=specialTileMaterial('ice',config.tiles.mobileSize);
+  materials.smokeTile=gasTileMaterial();
   materials.fire=specialTileMaterial('fire',config.tiles.mobileSize);
   materials.gold=specialTileMaterial('gold',config.tiles.mobileSize);
   const tintMaterial=iceTintMaterial(),tintGeometry=new THREE.PlaneGeometry(360,640);
@@ -66,6 +67,7 @@ export async function createScene(host, config, reducedMotion) {
   const snowPoints=new THREE.Points(snowGeometry,snowMaterial);
   snowPoints.frustumCulled=false;snowPoints.renderOrder=1;atmosphere.add(snowPoints);
   const geometry = roundedSquare(config.tiles.mobileSize);
+  const gasAuraGeometry=new THREE.PlaneGeometry(config.tiles.mobileSize+24,config.tiles.mobileSize+24);
   const shadowGeometry = new THREE.PlaneGeometry(80, 80);
   const textCache = new Map();
   const bodies = new Map(), transfers = [], clouds = [];
@@ -101,7 +103,8 @@ export async function createScene(host, config, reducedMotion) {
     const group = new THREE.Group();
     const surface=tile.effect==='smoke'?'smokeTile':tile.effect==='hourglass'?'ice':tile.effect==='fire'?'fire':tile.bonus?'gold':'cream';
     const ink=tile.effect==='smoke'?'smokeInk':tile.effect==='hourglass'?'iceInk':tile.effect==='fire'?'fireInk':tile.bonus?'goldInk':'letterInk';
-    const body = new THREE.Mesh(geometry, materials[surface]);
+    const pulseMaterial=surface==='smokeTile'?materials.smokeTile.clone():null;
+    const body = new THREE.Mesh(geometry, pulseMaterial||materials[surface]);
     group.add(body);
     const front = new THREE.Group();
     {
@@ -119,6 +122,12 @@ export async function createScene(host, config, reducedMotion) {
     group.userData.tile = tile;
     const halo = new THREE.Mesh(shadowGeometry, shadow); halo.position.z = -8; halo.renderOrder = -1;
     scene.add(halo, group);
+    let aura=null;
+    if(pulseMaterial){
+      aura=new THREE.Mesh(gasAuraGeometry,gasAuraMaterial());aura.renderOrder=-.5;
+      // A sibling of the tile, deliberately absent from the raycast group.
+      scene.add(aura);
+    }
     const fades=new Map();
     if(tile.bornAt!==undefined)group.traverse(object=>{
       if(!object.isMesh)return;
@@ -126,10 +135,12 @@ export async function createScene(host, config, reducedMotion) {
       if(!fades.has(source)){const material=source.clone();material.transparent=true;material.depthWrite=false;fades.set(source,material);}
       object.material=fades.get(source);
     });
-    const model = { group, halo, fades }; bodies.set(tile, model); return model;
+    const model = { group, halo, fades,pulseMaterial,aura,pulsePhase:pulseMaterial?Math.random()*Math.PI*2:0 }; bodies.set(tile, model); return model;
   }
   function removeBody(tile, model) {
     scene.remove(model.group, model.halo);
+    if(model.aura){scene.remove(model.aura);model.aura.material.dispose();}
+    model.pulseMaterial?.dispose();
     for (const material of model.fades.values()) material.dispose();
     bodies.delete(tile);
   }
@@ -169,6 +180,7 @@ export async function createScene(host, config, reducedMotion) {
     const reflectionTime=reducedMotion?0:game.elapsed;
     materials.ice.uniforms.time.value=reflectionTime;materials.fire.uniforms.time.value=reflectionTime;materials.gold.uniforms.time.value=reflectionTime;
     const visible = new Set(tiles);
+    const gasBlocked=Object.values(game.effects).some(remaining=>remaining>0)||!['running','paused'].includes(game.phase);
     for (const [tile, model] of bodies) if (!visible.has(tile)) removeBody(tile, model);
     for (const tile of tiles) {
       const model = bodies.get(tile) || build(tile);
@@ -179,11 +191,21 @@ export async function createScene(host, config, reducedMotion) {
       // Hover lifts the tile, without growing its collision silhouette.
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
+      const spawnOpacity=tile.bornAt===undefined?1:Math.min(1,Math.max(0,(game.elapsed-tile.bornAt)/config.falling.replacementFadeSeconds));
+      const pulse=LetterfallEffects.gasPulse(game.elapsed,model.pulsePhase,{blocked:gasBlocked,reducedMotion});
+      if(model.pulseMaterial){
+        model.pulseMaterial.uniforms.pulse.value=pulse;
+        model.aura.position.copy(model.group.position);model.aura.position.z=-4;
+        model.aura.rotation.copy(model.group.rotation);
+        model.aura.material.uniforms.opacity.value=pulse*.24*spawnOpacity;
+        model.aura.visible=pulse>0;
+      }
       if(model.fades.size){
-        const opacity=Math.min(1,Math.max(0,(game.elapsed-tile.bornAt)/config.falling.replacementFadeSeconds));
+        const opacity=spawnOpacity;
         for(const material of model.fades.values()){
           material.uniforms.opacity.value=opacity;
           if(material.uniforms.time)material.uniforms.time.value=reflectionTime;
+          if(material.uniforms.pulse)material.uniforms.pulse.value=pulse;
         }
         if(opacity>=1){
           const originals=new Map([...model.fades].map(([source,clone])=>[clone,source]));
@@ -218,6 +240,7 @@ export async function createScene(host, config, reducedMotion) {
       cloud.visible=game.effects.smoke>0;
       cloud.material.uniforms.opacity.value=pose.opacity;
       cloud.material.uniforms.time.value=reducedMotion?0:pose.localAge;
+      cloud.material.uniforms.dissolve.value=pose.dissolve;
       cloud.position.set(pose.x-layout.width/2,layout.height/2-pose.y,35);
       cloud.scale.set(pose.diameter*patch.aspect,pose.diameter/patch.aspect,1);
     }
@@ -227,7 +250,7 @@ export async function createScene(host, config, reducedMotion) {
       const t=tap.age/.24;tap.mesh.scale.setScalar(reducedMotion?1:1+t*1.8);tap.mesh.material.opacity=(1-t)*.38;
     }
     skyMaterial.uniforms.time.value = edgeMaterial.uniforms.time.value = reducedMotion ? 0 : game.elapsed;
-    stepIceWave(iceWave,{active:game.effects.hourglass>0,paused:game.phase==='paused',reducedMotion,delta:dt});
+    stepIceWave(iceWave,{active:game.effects.hourglass>0,paused:game.phase==='paused',reducedMotion,interrupted:Boolean(game.activeEffect&&game.activeEffect!=='hourglass'),delta:dt});
     tintMaterial.uniforms.opacity.value=iceWave.opacity;
     tintMaterial.uniforms.progress.value=iceWave.progress;
     stepIceSnow(snowState,{visible:iceWave.opacity>0,paused:game.phase==='paused',reducedMotion,delta:dt});
@@ -315,9 +338,9 @@ export async function createScene(host, config, reducedMotion) {
       }
       removeBody(tile, model);
     },
-    releaseSmoke() {
+    releaseSmoke(origin) {
       for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0;
-      const patches = LetterfallEffects.smokePatches(layout.width,layout.height,config.smoke);
+      const patches = LetterfallEffects.smokePatches(layout.width,layout.height,config.smoke,Math.random,origin);
       for (const patch of patches) {
         const material=smoke.clone();material.uniforms.seed.value=patch.seed;
         const cloud = new THREE.Mesh(cloudGeometry,material);
