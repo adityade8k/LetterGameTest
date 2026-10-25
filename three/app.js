@@ -389,8 +389,15 @@ window.addEventListener('keydown',event=>{
     if(tile)pick(tile);else{feedback(`No ${event.key.toUpperCase()} in reach yet.`);sound('miss');}
   }
 });
+let pendingScene;
 try{
-  scene=await createScene(document.getElementById('scene'),config,reducedMotion);
+  pendingScene=await createScene(document.getElementById('scene'),config,reducedMotion);
+  pendingScene.setReducedMotion(reducedMotion);
+  // Warm the real menu before the loader reaches 100%. Keep inputs blocked
+  // until its final frame is complete, then reuse the same WebGL canvas.
+  pendingScene.render([],game,0,performance.now(),null,view);
+  await pendingScene.finishLoading();
+  scene=pendingScene;pendingScene=null;
   updateLayout();
   scene.canvas.addEventListener('pointerdown',event=>{
     if(event.button!==0)return;
@@ -438,6 +445,10 @@ try{
   requestAnimationFrame(frame);
 }catch(error){
   console.error(error);
-  document.getElementById('scene').setAttribute('aria-label','CLTTR could not load. Refresh in a browser with WebGL enabled.');
+  await pendingScene?.failLoading('CLTTR could not load. Please refresh to try again.');
+  const host=document.getElementById('scene');
+  host.setAttribute('aria-label','CLTTR could not load. Refresh in a browser with WebGL enabled.');
+  const notice=document.createElement('p');notice.className='load-error';notice.setAttribute('role','alert');
+  notice.textContent='Couldn’t load CLTTR. Please refresh to try again.';host.append(notice);
   document.title='CLTTR — unable to load the 3D scene';
 }

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const port = Number(process.env.PORT || 5173);
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.txt': 'text/plain' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.txt': 'text/plain', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 const server = http.createServer((req, res) => {
   let pathname;
   try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
@@ -14,7 +14,9 @@ const server = http.createServer((req, res) => {
   }
   fs.readFile(file, (error, data) => {
     if (error) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': (types[path.extname(file)] || 'application/octet-stream') + '; charset=utf-8', 'Cache-Control': 'no-cache' });
+    const type=types[path.extname(file)]||'application/octet-stream';
+    const charset=type.startsWith('text/')||['application/json','image/svg+xml'].includes(type)?'; charset=utf-8':'';
+    res.writeHead(200, { 'Content-Type': type+charset, 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 });

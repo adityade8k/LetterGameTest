@@ -9,6 +9,7 @@ import { fitSmokeCoverage } from './smoke-coverage.mjs';
 import { createUI } from './ui.js';
 import { tileLayout, fitFaceObject } from './tile-layout.mjs';
 import { viewportLayout, fieldVeilBands } from './layout.mjs';
+import { createLoadingScreen } from './loading-screen.js';
 
 function roundedSquare(size) {
   const half = size / 2 - DESIGN.tile.bevel, r = DESIGN.tile.corner;
@@ -34,15 +35,25 @@ export async function createScene(host, config, reducedMotion) {
   const canvas = renderer.domElement;
   canvas.tabIndex = 0; canvas.setAttribute('role', 'application'); canvas.setAttribute('aria-label', 'Loading falling letters');
   host.append(canvas);
+  const loading=createLoadingScreen(renderer,host,reducedMotion);
+  const paintLoading=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  try{
+  await loading.ready;
+  loading.setProgress(.15);
+  let loadedAssets=0;
+  const assetReady=value=>{loading.setProgress(.15+(++loadedAssets)*.15);return value;};
   const [font,uiFont,smokeSource] = await Promise.all([
-    new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json'),
-    new FontLoader().loadAsync('vendor/fonts/fredoka-semibold.typeface.json'),
+    new FontLoader().loadAsync('vendor/three/helvetiker_bold.typeface.json').then(assetReady),
+    new FontLoader().loadAsync('vendor/fonts/fredoka-semibold.typeface.json').then(assetReady),
     new THREE.TextureLoader().loadAsync('assets/smoke-haze-atlas.png').then(texture=>{
       texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=false;texture.minFilter=THREE.LinearFilter;
       return texture;
-    }).catch(()=>null),
+    }).catch(()=>null).then(assetReady),
   ]);
+  await paintLoading();
   const ui = createUI(uiFont, config, reducedMotion);
+  loading.setProgress(.7);
+  await paintLoading();
   const camera = new THREE.OrthographicCamera(-180, 180, 320, -320, .1, 100);
   camera.position.z = 60;
   let layout;
@@ -89,6 +100,8 @@ export async function createScene(host, config, reducedMotion) {
   let smokeAtlas;
   try{smokeAtlas=createSmokeAtlas(renderer,smokeSource);}
   finally{smokeSource?.dispose();} // Only the compact baked atlas remains on the GPU.
+  loading.setProgress(.85);
+  await paintLoading();
   const cloudGeometry = new THREE.PlaneGeometry(1, 1);
   const shadow = thermal(new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
@@ -192,6 +205,7 @@ export async function createScene(host, config, reducedMotion) {
   const observer = new ResizeObserver(resize);
   observer.observe(host);
   resize();
+  loading.setProgress(.95);
 
   function render(tiles, game, dt, now, hover, view) {
     const reflectionTime=reducedMotion?0:(view.tutorial?.visualTime??game.elapsed);
@@ -298,6 +312,12 @@ export async function createScene(host, config, reducedMotion) {
   }
   return {
     canvas, render, ui,
+    async finishLoading(){
+      await loading.finish();
+      canvas.setAttribute('role','application');
+      for(const name of ['aria-valuemin','aria-valuemax','aria-valuenow','aria-valuetext'])canvas.removeAttribute(name);
+    },
+    failLoading:message=>loading.fail(message),
     tapFeedback(clientX,clientY){
       const rect=canvas.getBoundingClientRect();
       const x=(clientX-rect.left)/rect.width*layout.width-layout.width/2;
@@ -374,4 +394,8 @@ export async function createScene(host, config, reducedMotion) {
     // frames dissolve it gently even if the round ended or was restarted.
     reset() { for(const tap of taps){tap.mesh.removeFromParent();tap.mesh.material.dispose();}taps.length=0;ui.reset();clearTransfers();for (const cloud of clouds) {scene.remove(cloud);cloud.material.dispose();} clouds.length = 0; },
   };
+  }catch(error){
+    await loading.fail('CLTTR could not load. Please refresh to try again.');
+    throw error;
+  }
 }
