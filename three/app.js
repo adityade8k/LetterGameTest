@@ -7,6 +7,8 @@ import { spawnPosition, fieldPosition, openingFeed, supplyProfile, DensityRamp, 
 import { exposedPosition } from './layout.mjs';
 import { ProgressStore, STORAGE_KEY } from '../progress.mjs';
 import { createAudio } from './audio.mjs';
+import { TutorialSession } from './tutorial.mjs';
+import { keyboardHints } from './keyboard-hints.mjs';
 
 // Only the WebGL canvas is attached to the page. The interface and its hit
 // targets live in ui.js; the original dictionary and game rules stay shared.
@@ -19,6 +21,8 @@ const densityRamp=new DensityRamp(config.density),arrivals=new ArrivalClock();
 const letterSupply=new PrefixLetterSupply(game.dictionary,config.wordAssist);
 const frequencySupply=new FrequencyLetterSupply(config.letterFrequency);
 const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
+const finePointerPreference=matchMedia('(any-pointer: fine)'),hoverPreference=matchMedia('(any-hover: hover)');
+const desktopKeys=()=>keyboardHints({platform:navigator.userAgentData?.platform||navigator.platform,userAgent:navigator.userAgent,maxTouchPoints:navigator.maxTouchPoints,finePointer:finePointerPreference.matches,hover:hoverPreference.matches});
 let reducedMotion=motionPreference.matches;
 const size=config.tiles.mobileSize;
 let width=DESIGN.width,height=DESIGN.height,layout;
@@ -27,6 +31,7 @@ const storageKey='letterfall.best.points.v2';
 let scene,tiles=[],hover=null,lastLabel=0,lastPhase='ready',feedbackUntil=0;
 let best=0,roundBest=0,resumeAfterMenu=false,roundId='',activeOffset=0,bestChain=0,lastCheckpoint=0,lastLowWarning=-Infinity;
 const menuStack=[];
+let tutorial=null,tutorialReturn=null;
 let storage;
 try{storage=localStorage;}catch{/* Private browsers may deny storage access. */}
 const settings={effects:true,music:false,haptics:false,reducedMotion};
@@ -39,7 +44,8 @@ const ruleSignature=JSON.stringify(Object.fromEntries(Object.entries(config).fil
 let ruleHash=2166136261;for(const char of ruleSignature)ruleHash=Math.imul(ruleHash^char.charCodeAt(0),16777619)>>>0;
 const progress=new ProgressStore(storage,{ruleVersion:`clttr-${ruleHash.toString(16)}`,dictionaryVersion:'bundled-english-v1'});
 const view={mode:'',collectionPage:0,feedback:'',feedbackKind:'',focus:'',hover:'',best:0,roundBest:0,soundOn:settings.effects,
-  settings,book:progress.snapshot(),roundSummary:null,wordbookFilter:'all',wordbookSort:'recent',wordbookQuery:'',wordbookPage:0,wordbookOnlyNew:false,wordDetail:'',menuReturn:'',statsView:'lifetime'};
+  keyboardHints:desktopKeys(),settings,book:progress.snapshot(),roundSummary:null,wordbookFilter:'all',wordbookSort:'recent',wordbookQuery:'',wordbookPage:0,wordbookOnlyNew:false,wordDetail:'',menuReturn:'',statsView:'lifetime'};
+for(const preference of [finePointerPreference,hoverPreference])preference.addEventListener?.('change',()=>{view.keyboardHints=desktopKeys();if(scene){sync();updateLabel();}});
 try{const saved=Number(localStorage.getItem(storageKey));if(Number.isSafeInteger(saved)&&saved>=0)best=saved;}catch{/* Storage is optional. */}
 best=progress.importBestScore(best);view.book=progress.snapshot();
 const format=value=>String(Number(value.toFixed(2)));
@@ -52,7 +58,7 @@ function checkpoint(){
   progress.setActiveSeconds(activeOffset+game.elapsed,{roundId,activeSeconds:game.elapsed});lastCheckpoint=game.elapsed;refreshBook();
 }
 function saveSettings(){
-  reducedMotion=settings.reducedMotion;audio.setSettings(settings);scene?.setReducedMotion(reducedMotion);
+  reducedMotion=settings.reducedMotion;audio.setSettings(settings);scene?.setReducedMotion(reducedMotion);if(tutorial)tutorial.reducedMotion=reducedMotion;
   try{storage?.setItem('clttr.settings.v1',JSON.stringify(settings));}catch{}
   audioReady=audio.unlock();
 }
@@ -105,6 +111,7 @@ function updateLayout(){
   const old=layout;layout=scene.layout;width=layout.width;height=layout.height;
   if(old){for(const tile of tiles){tile.x*=width/old.width;tile.y*=height/old.height;}}
   settleTiles(tiles,width,size,config.physics);
+  tutorial?.resize(layout);
 }
 function exposedTile(tile){return exposedPosition(tile.x,tile.y,layout,size/2)&&!scene.ui.obscures(tile.x,tile.y,size/2);}
 function topEntry(){
@@ -157,6 +164,12 @@ function handle(result){
 }
 function visibleTiles(){return tiles.filter(tile=>exposedTile(tile)&&(tile.bornAt===undefined||game.elapsed-tile.bornAt>=config.falling.replacementFadeSeconds));}
 function pick(tile){
+  if(tutorial){
+    view.focus='';view.hover='';
+    const results=tutorial.pick(tile);if(!results.length)sound('miss');
+    if(results.some(result=>['letter','effect','penalty'].includes(result.type)&&result.consumed!==false)){scene.burst(tile,{target:'tray',index:Math.max(0,tutorial.game.current.length-1)});hover=null;}
+    practiceFeedback(results);sync();updateLabel();return;
+  }
   if(game.phase!=='running'||view.mode)return;
   if(tile.bornAt!==undefined&&game.elapsed-tile.bornAt<config.falling.replacementFadeSeconds)return;
   view.focus='';
@@ -169,6 +182,11 @@ function pick(tile){
 }
 function sync(updateUI=true){
   audio.setActive(!document.hidden);
+  if(tutorial){
+    audio.setAmbientActive(false);syncTutorialView();
+    if(updateUI)scene?.ui.sync(tutorial.game,view);
+    return;
+  }
   view.best=best;view.roundBest=roundBest;view.soundOn=settings.effects;
   if(game.phase!==lastPhase){
     lastPhase=game.phase;
@@ -182,13 +200,19 @@ function sync(updateUI=true){
 function updateLabel(){
   if(!scene)return;
   const labels=scene.ui.buttons();
+  if(tutorial){
+    const label=`${scene.ui.description(tutorial.game,view)} Controls: ${labels.map(c=>c.label).join('; ')}.${view.keyboardHints?` Tab to focus a control; ${view.keyboardHints.submit} to activate. Type the highlighted letter or tap its tile. ${view.keyboardHints.clear} clears. Escape exits practice.`:''}`;
+    if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
+    return;
+  }
   const letters=visibleTiles().map(tile=>tile.blank?'blank wildcard (0 points)':`${tile.letter}${tile.effect==='smoke'?' (magenta, smoke)':tile.effect==='hourglass'?' (ice, slow time)':tile.effect==='fire'?` (fire, ${config.fire.worldTimeScale} times faster tiles)`:''}${tile.bonus?' (gold, double score)':''}`).join(', ');
   const effects=`${game.effects.fire>0?` Faster tiles: ${Math.ceil(game.effects.fire)} seconds. Timers remain at normal speed.`:''}${game.effects.hourglass>0?` Slow time: ${Math.ceil(game.effects.hourglass)} seconds.`:''}${game.effects.smoke>0?` Smoke: ${Math.ceil(game.effects.smoke)} seconds.`:''}`;
   const description=scene.ui.description(game,view);
-  const label=`${description}${effects} ${view.mode||game.phase==='ready'?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}Tab to focus a control, Enter or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; Enter submits; Backspace clears the whole word; Escape pauses or resumes.`;
+  const label=`${description}${effects} ${view.mode||game.phase==='ready'?'':`Visible tiles: ${letters}. `}Controls: ${labels.map(c=>c.label).join('; ')}. ${view.focus?`Focused control: ${labels.find(c=>c.id===view.focus)?.label||''}. `:''}${view.keyboardHints?`Tab to focus a control, ${view.keyboardHints.submit} or Space to activate. Letter keys catch matching tiles; ? or * catches a blank wildcard; ${view.keyboardHints.submit} submits; ${view.keyboardHints.clear} clears the whole word; Escape pauses or resumes.`:''}`;
   if(scene.canvas.getAttribute('aria-label')!==label)scene.canvas.setAttribute('aria-label',label);
 }
 function begin(){
+  if(tutorial)endTutorial(false);
   if(roundId&&game.phase!=='over')finishRound(true);
   roundBest=best;game.start(performance.now());difficulty.reset();scene.reset();refills.reset();densityRamp.reset();arrivals.reset();hover=null;updateLayout();seed();
   roundId=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -198,6 +222,7 @@ function begin(){
   sync();updateLabel();scene.canvas.focus({preventScroll:true});sound('start');
 }
 function togglePause(){
+  if(tutorial)return;
   if(game.phase==='running'){
     handle(game.pause(performance.now()));
     checkpoint();if(game.phase==='paused'){view.mode='paused';view.focus='menu';sound('pause');}
@@ -228,6 +253,48 @@ function home(){
   tiles=[];
   sync();updateLabel();
 }
+function syncTutorialView(){
+  const state=tutorial.state;
+  let highlightRect=null;
+  if(state.target==='tile'){
+    const tile=tutorial.tiles.find(tile=>tile.id===state.targetTileId);
+    if(tile)highlightRect={x:tile.x-layout.left-size/2-3,y:tile.y-layout.top-size/2-3,w:size+6,h:size+6};
+  }else if(state.target==='submit')highlightRect={x:76,y:layout.height-layout.bottom-layout.top-86,w:262,h:54};
+  else if(state.target==='undo')highlightRect={x:22,y:layout.height-layout.bottom-layout.top-81,w:46,h:44};
+  else if(state.target==='timer')highlightRect={x:18,y:60,w:324,h:14};
+  else if(state.target==='score')highlightRect={x:18,y:10,w:132,h:32};
+  view.tutorial={...state,highlightRect,nextLabel:state.id==='ready'&&(tutorialReturn?.mode==='paused'||tutorialReturn?.resume)?'Back to Game':state.nextLabel};
+}
+function practiceFeedback(results=[]){
+  for(const result of results){
+    if(result.type==='tutorial-step'){scene.reset();view.feedback='';view.feedbackKind='';view.focus='';hover=null;sound('ui');continue;}
+    if(result.type==='word'){
+      scene.ui.celebrate(result,tutorial.game);sound('word',{length:result.word.length});
+      if(result.scoreMultiplier>1&&result.points>0)sound('gold');
+    }else if(result.type==='letter')sound('letter',{length:tutorial.game.current.length});
+    else if(result.type==='penalty')sound('clear');
+    const effect=result.tileEffect?.effect||(result.type==='effect'?result.effect:null);
+    if(effect){if(effect==='smoke')scene.releaseSmoke();sound(effect==='smoke'?'grenade':effect==='fire'?'fire':'hourglass');}
+  }
+}
+function startTutorial(){
+  const resume=game.phase==='running';
+  if(resume)handle(game.pause(performance.now()));
+  checkpoint();
+  tutorialReturn={mode:view.mode,focus:view.focus,feedback:view.feedback,feedbackKind:view.feedbackKind,resume:resume&&game.phase==='paused'};
+  tutorial=new TutorialSession(Letterfall.WordGame,config);tutorial.reducedMotion=reducedMotion;tutorial.resize(layout);
+  scene.reset();view.mode='';view.focus='';view.hover='';view.feedback='';view.feedbackKind='';hover=null;
+  sync();updateLabel();scene.canvas.focus({preventScroll:true});
+}
+function endTutorial(update=true){
+  if(!tutorial)return;
+  const previous=tutorialReturn;tutorial=null;tutorialReturn=null;view.tutorial=null;
+  scene.reset();hover=null;Object.assign(view,{mode:previous.mode,focus:previous.focus,feedback:previous.feedback,feedbackKind:previous.feedbackKind,hover:''});
+  if(previous.resume)game.resume(performance.now());
+  // Recreate an interrupted gas visual at its saved age when returning to a round.
+  if(game.effects.smoke>0)scene.releaseSmoke();
+  if(update){sync();updateLabel();}
+}
 function queryInput(key){
   sound('ui');
   if(key==='done'){closeMenu();return;}
@@ -236,6 +303,15 @@ function queryInput(key){
   view.wordbookPage=0;sync();updateLabel();
 }
 function act(action){
+  if(tutorial){
+    scene.ui.press(action,performance.now());view.focus='';view.hover='';
+    if(action==='tutorial-exit'){sound('ui');endTutorial();return;}
+    if(!['tutorial-next','submit','undo'].includes(action))return;
+    const previous=tutorial.state.id,results=tutorial.act(action);
+    if(results.some(result=>result.type==='tutorial-complete')){const resume=tutorialReturn?.mode==='paused'||tutorialReturn?.resume;endTutorial();if(!resume)begin();else if(game.phase==='paused')togglePause();return;}
+    if(tutorial.state.id!==previous){scene.reset();view.feedback='';view.feedbackKind='';sound('ui');}
+    practiceFeedback(results);sync();updateLabel();return;
+  }
   scene.ui.press(action,performance.now());
   view.hover='';view.focus='';hover=null;
   const [type,value]=action.split(':');
@@ -254,7 +330,8 @@ function act(action){
     case 'submit':if(!game.current&&game.phase==='running'){feedback('Catch a letter first.');sound('miss');}else handle(game.submit(performance.now()));break;
     case 'undo':if(!game.current&&game.phase==='running'){feedback('Your tray is empty.');sound('miss');}else handle(game.undo(performance.now()));break;
     case 'sound':settings.effects=!settings.effects;saveSettings();sound('letter');break;
-    case 'help':case 'settings':case 'stats':case 'goals':openMenu(action);return;
+    case 'help':startTutorial();return;
+    case 'settings':case 'stats':case 'goals':openMenu(action);return;
     case 'wordbook':
       view.wordbookOnlyNew=false;view.wordbookPage=0;view.wordbookQuery='';view.wordbookFilter='all';openMenu('wordbook');return;
     case 'results-new':
@@ -280,23 +357,30 @@ motionPreference.addEventListener?.('change',event=>{settings.reducedMotion=even
 window.addEventListener('keydown',event=>{
   if(!scene||event.ctrlKey||event.metaKey||event.altKey)return;
   audioReady=audio.unlock();
-  if(view.mode==='search'&&(/^[a-z]$/i.test(event.key)||event.key==='Backspace'||event.key==='Enter')){event.preventDefault();queryInput(event.key==='Backspace'?'backspace':event.key==='Enter'?'done':event.key);return;}
+  const clearKey=event.key==='Backspace'||event.key==='Delete',submitKey=event.key==='Enter'||event.key==='Return';
+  if(view.mode==='search'&&(/^[a-z]$/i.test(event.key)||clearKey||submitKey)){event.preventDefault();queryInput(clearKey?'backspace':submitKey?'done':event.key);return;}
   if(event.key==='Tab'){
     event.preventDefault();sound('ui');view.focus=scene.ui.focusNext(view.focus,event.shiftKey?-1:1);scene.canvas.focus({preventScroll:true});sync();updateLabel();return;
   }
   if(event.key==='Escape'){
-    event.preventDefault();if(view.mode&&view.mode!=='paused'&&view.mode!=='over')closeMenu();else if(game.phase!=='over')togglePause();return;
+    event.preventDefault();if(tutorial){act('tutorial-exit');return;}if(view.mode&&view.mode!=='paused'&&view.mode!=='over')closeMenu();else if(game.phase!=='over')togglePause();return;
   }
-  if(event.key==='Enter'||event.key===' '){
+  if(submitKey||event.key===' '){
     event.preventDefault();
     if(view.focus&&scene.ui.buttons().some(c=>c.id===view.focus))act(view.focus);
+    else if(tutorial){if(tutorial.state.canContinue)act('tutorial-next');else if(tutorial.state.target==='submit')act('submit');}
     else if(view.mode)act('menu');
     else if(game.phase==='ready')begin();
-    else if(game.phase==='running'){if(event.key==='Enter')act('submit');else togglePause();}
+    else if(game.phase==='running'){if(submitKey)act('submit');else togglePause();}
+    return;
+  }
+  if(tutorial){
+    if(clearKey){event.preventDefault();act('undo');}
+    else if(/^[a-z]$/i.test(event.key)){event.preventDefault();const tile=tutorial.tiles.find(t=>t.letter===event.key.toUpperCase()&&t.id===tutorial.state.targetTileId);if(tile)pick(tile);else sound('miss');}
     return;
   }
   if(view.mode||game.phase!=='running')return;
-  if(event.key==='Backspace'){event.preventDefault();act('undo');}
+  if(clearKey){event.preventDefault();act('undo');}
   else if(event.key==='?'||event.key==='*'){event.preventDefault();const tile=visibleTiles().find(t=>t.blank);if(tile)pick(tile);else{feedback('No blank in reach yet.');sound('miss');}}
   else if(/^[a-z]$/i.test(event.key)){
     event.preventDefault();const tile=visibleTiles().filter(t=>t.letter===event.key.toUpperCase()).sort((a,b)=>b.y-a.y)[0];
@@ -315,7 +399,7 @@ try{
   });
   scene.canvas.addEventListener('pointermove',event=>{
     const hit=scene.hit(event.clientX,event.clientY);view.hover=hit?.action||'';
-    hover=game.phase==='running'&&!view.mode?hit?.tile||null:null;
+    hover=(tutorial||game.phase==='running')&&!view.mode?hit?.tile||null:null;
     scene.canvas.style.cursor=view.hover||hover?'pointer':'default';
   });
   scene.canvas.addEventListener('pointerleave',()=>{hover=null;view.hover='';});
@@ -325,7 +409,14 @@ try{
   tiles=[];
   sync();updateLabel();let previous=performance.now();
   function frame(now){
-    const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();handle(game.advance(now));
+    const dt=Math.min((now-previous)/1000,.05);previous=now;updateLayout();
+    if(tutorial){
+      practiceFeedback(tutorial.advance(document.hidden?0:dt));sync(false);
+      scene.render(tutorial.tiles,tutorial.game,document.hidden?0:dt,now,hover,view);
+      if(now-lastLabel>250){updateLabel();lastLabel=now;}
+      requestAnimationFrame(frame);return;
+    }
+    handle(game.advance(now));
     if(game.phase==='running'){
       if(game.elapsed-lastCheckpoint>=10)checkpoint();
       if(game.remaining<=config.timer.lowTimeSeconds&&game.elapsed-lastLowWarning>=config.engagement.lowWarningCooldownSeconds){sound('lowtime');lastLowWarning=game.elapsed;}

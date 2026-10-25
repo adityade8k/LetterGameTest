@@ -154,7 +154,7 @@ function thermalTintMaterial(fire=false){
       source:{value:null},tint:{value:new THREE.Color(fire?DESIGN.palette.fireTint:DESIGN.palette.iceTint)},
       dark:{value:new THREE.Color(fire?DESIGN.palette.fireInk[0]:DESIGN.palette.iceInk[0])},
       light:{value:new THREE.Color(fire?DESIGN.palette.fireGlow:DESIGN.palette.ice[0])},
-      opacity:{value:0},progress:{value:0},strength:{value:fire?.86:.92},reverse:{value:fire?1:0},
+      opacity:{value:0},progress:{value:0},strength:{value:fire?.91:.92},reverse:{value:fire?1:0},
     },
     vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
     fragmentShader:`varying vec2 vUv;uniform sampler2D source;
@@ -300,7 +300,8 @@ export function atmosphereMaterial({veil=false}={}) {
         float height=uv.y+sin(uv.x*3.1)*.055;
         vec3 col=mix(horizon,ember,smoothstep(.02,.48,height));
         col=mix(col,magenta,smoothstep(.28,.77,height));
-        col=mix(col,sky,smoothstep(.62,1.02,height));
+        col=mix(col,mist,smoothstep(.64,.84,height)*.65);
+        col=mix(col,sky,smoothstep(.76,1.08,height));
         float glow=exp(-length((uv-vec2(.12,.15))*vec2(1.7,2.4))*4.0);
         col=mix(col,horizon,glow*.23);
         float fog=sin(uv.y*17.0+sin(uv.x*6.0+time*.06)*.9)*.5+.5;

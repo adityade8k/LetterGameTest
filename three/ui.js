@@ -5,6 +5,8 @@ import { DESIGN } from './design.js';
 import { createIcon } from './icons.js';
 import { RewardMeters, ScoreFlights, scoreFlightPose, clamp01, easeOut } from './reward-motion.mjs';
 import { overlapsPanel } from './layout.mjs';
+import { createTutorialUI } from './tutorial-ui.js';
+import { TimerPresentation, timerStage } from './timer-presentation.mjs';
 
 // Every visible interface element is geometry in this scene. There are no
 // DOM buttons, CSS labels, HTML textures, sprites, or CSS2D/CSS3D renderers.
@@ -24,6 +26,9 @@ export function createUI(font, config, reducedMotion=false) {
     edge: celMaterial(['#c19b8b', '#957184']),
     primaryEdge: celMaterial(['#b67c35', '#8b592b']),
     danger: celMaterial(['#bb545c', '#8d4355']),
+    timeHigh: celMaterial(['#62b6df', '#3583b4']),
+    timeMiddle: celMaterial(['#f0bc55', '#c88b31']),
+    timeLow: celMaterial(['#ef6576', '#b93d57']),
     buttonShine: celMaterial(['#fff4db', '#f7dfba']),
     primaryShine: celMaterial(['#ffe2a1', '#f6ca73']),
     iconShade: celMaterial(['#352637', '#2e2033']),
@@ -52,9 +57,10 @@ export function createUI(font, config, reducedMotion=false) {
   let phase = 'ready', mode = '', focus = '', hover = '', lastPress = '', pressUntil = 0;
   let collectionPage = 0, collectionPages = 1, bookPages = 1;
   const meters=new RewardMeters(config.celebration),celebrations=[];
+  const timerPresentation=new TimerPresentation();
   const scoreLedger=new ScoreFlights({durationSeconds:config.engagement?.scoreFlightSeconds}),scoreFlights=[];
   let scoreSettleAge=Infinity,goldCelebration=null;
-  let currentLayout=null,effectsVisible=false;
+  let currentLayout=null,effectsVisible=false,tutorialState=null;
 
   function group(parent = scene, x = 0, y = 0, z = 0) {
     const object = new THREE.Group();
@@ -196,7 +202,7 @@ export function createUI(font, config, reducedMotion=false) {
   function isWithin(object,parent){for(let o=object;o;o=o.parent)if(o===parent)return true;return false;}
   function ancestorsVisible(object){for(let o=object;o;o=o.parent){if(!o.visible)return false;if(o===scene)return true;}return false;}
   function enabledControls(){
-    return controls.filter(c=>c.enabled&&ancestorsVisible(c.root)&&(mode?isWithin(c.root,modal):!isWithin(c.root,modal)));
+    return controls.filter(c=>c.enabled&&ancestorsVisible(c.root)&&(mode?isWithin(c.root,modal):!isWithin(c.root,modal))&&(!tutorialState||c.id.startsWith('tutorial-')||(!tutorialState.completed&&c.id===tutorialState.target)));
   }
   function setEnabled(c,enabled){c.enabled=enabled;c.body.material=materials[enabled?(c.primary?'primary':c.gold?'gold':'paper'):'pale'];}
 
@@ -211,14 +217,22 @@ export function createUI(font, config, reducedMotion=false) {
   pause.label='Pause game';
   // A dedicated, recessed rail clears the score and pause controls. Its fill
   // remains the normal clock color during fire: only the letters speed up.
-  const timerTrack=panel(hud,18,60,324,10,'edge',5,2,1);
+  const timerAssembly=group(hud,180,67);
+  timerAssembly.userData.roundTimeAssembly=true;
+  const timerTrack=panel(timerAssembly,-162,-7,324,14,'edge',7,2,1.5);
   timerTrack.userData.roundTimeTrack=true;
-  const timer=panel(hud,20,61,320,8,'ink',4,4,.6);
+  const timer=panel(timerAssembly,-160,-5,320,10,'timeHigh',5,4,1);
   timer.userData.roundTimeBar=true;
-  const overtime=panel(hud,20,61,320,8,'gold',4,5.4,.6);
+  const overtime=panel(timerAssembly,-160,-5,320,10,'gold',5,5.4,1);
   overtime.userData.overtimeBar=true;overtime.visible=false;
-  const recharge=panel(hud,20,61,320,8,'mint',4,6.5,.4);
+  const timerTip=group(timerAssembly,160,0,7);
+  panel(timerTip,-3,-6,6,12,'cream',3,0,.6);
+  const recharge=panel(timerAssembly,-160,-5,320,10,'mint',5,6.5,.4);
   recharge.material=materials.mint.clone();recharge.material.transparent=true;recharge.material.depthWrite=false;recharge.visible=false;
+  const overtimeNotice=group(hud,224,24,8);
+  overtimeNotice.userData.overtimeLabel=true;overtimeNotice.visible=false;
+  panel(overtimeNotice,-48,-10,96,20,'gold',10,0,1.5);
+  text(overtimeNotice,'OVERTIME',0,-4,{size:8,align:'center',material:'goldInk',maxWidth:82,z:4});
 
   const settingsButton=button(homeHud,'settings','',298,8,44,44,{iconName:'gear',round:true});
   settingsButton.label='Settings';
@@ -281,7 +295,8 @@ export function createUI(font, config, reducedMotion=false) {
   }
   function celebrateGold(){
     clearGoldCelebration();
-    const root=group(rewardLayer,180,139,20),badge=group(root);
+    const anchorY=tutorialState?310:139;
+    const root=group(rewardLayer,180,anchorY,20),badge=group(root);
     root.userData.goldCelebration=true;
     panel(badge,-106,-21,212,42,'goldInk',14,-2,2);
     panel(badge,-104,-23,208,40,'gold',13,1,3);
@@ -293,7 +308,7 @@ export function createUI(font, config, reducedMotion=false) {
       panel(star,-1,-5,2,10,'goldLight',1,0,.4);panel(star,-5,-1,10,2,'goldLight',1,0,.4);
       sparkles.push(star);
     }
-    goldCelebration={root,badge,sparkles,materials:fadeMaterials(root),age:0};
+    goldCelebration={root,badge,sparkles,materials:fadeMaterials(root),age:0,anchorY};
     animateGoldCelebration();
   }
   function animateGoldCelebration(){
@@ -302,7 +317,7 @@ export function createUI(font, config, reducedMotion=false) {
     const pop=1+2.7*v*v*v+1.7*v*v;
     item.badge.scale.setScalar(reducedMotion?1:.65+.35*pop);
     item.badge.rotation.z=reducedMotion?0:Math.sin(item.age*13)*.045*Math.exp(-item.age*3);
-    item.root.position.y=-(139-(reducedMotion?0:5*easeOut(clamp01(item.age/1.6))));
+    item.root.position.y=-(item.anchorY-(reducedMotion?0:5*easeOut(clamp01(item.age/1.6))));
     item.sparkles.forEach((star,i)=>star.scale.setScalar(reducedMotion?1:.8+.22*Math.sin(item.age*10+i)));
     setAlpha(item.materials,(reducedMotion?1:clamp01(item.age/.08))*(1-clamp01((item.age-1.2)/.4)));
   }
@@ -352,14 +367,17 @@ export function createUI(font, config, reducedMotion=false) {
   function syncMeters(game){
     const shown={time:reducedMotion?game.remaining:meters.values(game.remaining,game.score).time,score:scoreLedger.value(game.score)},normalCapacity=config.timer.maxSeconds,timeRatio=shown.time/normalCapacity;
     const extraCapacity=game.maxTimeSeconds-normalCapacity,inOvertime=shown.time>normalCapacity;
+    if(game.phase==='running'||game.phase==='paused')timerPresentation.observe(game.remaining,normalCapacity);
+    const stage=timerStage(game.remaining,normalCapacity),pose=timerPresentation.pose(reducedMotion);
+    timerAssembly.userData.timerStage=stage;timerAssembly.userData.timerCue=pose.cue;
+    timerAssembly.scale.set(pose.scaleX,pose.scaleY,1);
     timer.scale.x=Math.max(.001,Math.min(1,timeRatio));
-    timer.material=materials[game.effects.hourglass>0?'ice':game.remaining<=config.timer.lowTimeSeconds?'danger':'ink'];
+    timer.material=materials[stage==='low'?'timeLow':game.effects.hourglass>0?'ice':stage==='middle'?'timeMiddle':'timeHigh'];
     overtime.visible=inOvertime&&extraCapacity>0;
     overtime.scale.x=Math.max(.001,Math.min(1,(shown.time-normalCapacity)/Math.max(.001,extraCapacity)));
-    const shownOvertime=overtime.visible?Math.ceil(timeRatio*100):0;
-    slot('overtime',hud,shownOvertime,g=>{
-      if(shownOvertime){g.userData.overtimeLabel=true;text(g,`OVERTIME ${shownOvertime}%`,224,20,{size:7.8,align:'center',material:'goldInk',maxWidth:130});}
-    });
+    timerTip.position.x=-160+320*(overtime.visible?overtime.scale.x:timer.scale.x);
+    timerTip.scale.setScalar(pose.tipScale);timerTip.visible=shown.time>0;
+    overtimeNotice.visible=pose.labelVisible;overtimeNotice.scale.setScalar(pose.labelScale);
     scoreAnchor.userData.displayedScore=shown.score;
     slot('score',scoreAnchor,shown.score,g=>text(g,String(shown.score).padStart(2,'0'),0,0,{size:22,align:'right',maxWidth:91}));
     const latest=celebrations.at(-1),age=latest?.age??Infinity;
@@ -367,7 +385,7 @@ export function createUI(font, config, reducedMotion=false) {
     if(recharge.visible){
       const base=inOvertime?normalCapacity:0,range=inOvertime?extraCapacity:normalCapacity;
       const from=clamp01((latest.startTime-base)/range),to=clamp01((shown.time-base)/range);
-      recharge.position.x=20+from*320;recharge.scale.x=Math.max(.001,to-from);
+      recharge.position.x=-160+from*320;recharge.scale.x=Math.max(.001,to-from);
       recharge.material.uniforms.opacity.value=.28*(1-clamp01((age-.4)/.75));
     }
   }
@@ -525,10 +543,12 @@ export function createUI(font, config, reducedMotion=false) {
     });
   }
 
+  const tutorialUI=createTutorialUI({scene,group,slot,plinth,text,lines,button,materials});
+
   return {
     scene,
     resize(layout){
-      currentLayout=layout;
+      currentLayout=layout;tutorialUI.resize(layout);
       hud.position.y=homeHud.position.y=status.position.y=rewardLayer.position.y=layout.height/2-layout.top;
       intro.position.y=320+(layout.bottom-layout.top)/2;
       playing.position.y=640-layout.height/2+layout.bottom;
@@ -536,6 +556,7 @@ export function createUI(font, config, reducedMotion=false) {
     },
     obscures(x,y,margin=0){
       if(mode)return true;
+      if(tutorialUI.obscures(x,y,margin))return true;
       if(!currentLayout)return false;
       if(overlapsPanel(x,y,currentLayout,margin))return true;
       const localX=x-currentLayout.left,localY=y-currentLayout.top;
@@ -543,13 +564,14 @@ export function createUI(font, config, reducedMotion=false) {
     },
     get blocking(){return Boolean(mode);},
     sync(game,view,deferMeters=false) {
+      tutorialState=view.tutorial||null;tutorialUI.sync(tutorialState);
       if(game.phase==='over'&&phase!=='over'){clearScoreFlights();clearGoldCelebration();}
       phase=game.phase;mode=view.mode;collectionPages=Math.max(1,Math.ceil(game.wordCount/8));collectionPage=Math.max(0,Math.min(view.collectionPage||0,collectionPages-1));
       intro.visible=homeHud.visible=phase==='ready';playing.visible=phase==='running'||phase==='paused';modal.visible=Boolean(mode);
       hud.visible=phase==='running'||phase==='paused';
       if(!deferMeters)syncMeters(game);
       rewardLayer.visible=phase==='running'&&!mode;
-      pause.enabled=phase==='running';pause.root.visible=phase!=='ready';
+      pause.enabled=phase==='running'&&!tutorialState;pause.root.visible=phase!=='ready'&&!tutorialState;
       slot('storageStatus',intro,view.book?.storageStatus?.state||'',g=>{if(view.book?.storageStatus?.state==='unavailable')text(g,'Discoveries saved for this visit',180,583,{size:6,align:'center',material:'muted',maxWidth:310});});
       const signature=game.current+game.currentTiles.map(t=>`${t.blank?'?':t.bonus?'1':'0'}:${t.effect||''}`).join('')+phase+':'+game.letterWindow;
       letterTimer.visible=Boolean(game.current)&&phase!=='over';
@@ -561,8 +583,17 @@ export function createUI(font, config, reducedMotion=false) {
       });
       setEnabled(submit,phase==='running'&&Boolean(game.current));setEnabled(undo,phase==='running'&&Boolean(game.current));
       submit.label=game.current?`Submit ${game.current}`:'Submit current word';undo.label=`Clear whole word, ${fmt(config.penalties.clearWordSeconds)} second penalty`;
+      slot('keyboard-hints',playing,view.keyboardHints?`${view.keyboardHints.clear}:${view.keyboardHints.submit}`:'',g=>{
+        if(!view.keyboardHints)return;
+        g.userData.keyboardHints=true;
+        for(const [label,x,w] of [[view.keyboardHints.clear,22,46],[view.keyboardHints.submit,284,54]]){
+          panel(g,x,624,w,12,'edge',3,-1,.5);
+          panel(g,x,623,w,11,'paper',3,0,.5);
+          text(g,label,x+w/2,625,{size:6,align:'center',material:'ink',maxWidth:w-6,z:2});
+        }
+      });
       const smoke=game.effects.smoke>0;
-      effectsVisible=phase==='running'&&smoke;status.visible=phase!=='ready';
+      effectsVisible=phase==='running'&&smoke&&!tutorialState;status.visible=phase!=='ready'&&!tutorialState;
       slot('effects',status,smoke,g=>{
         if(smoke){panel(g,137,86,86,22,'smoke',11);text(g,'SMOKE',180,93,{size:6.7,align:'center',material:'smokeInk'});}
       });
@@ -592,9 +623,11 @@ export function createUI(font, config, reducedMotion=false) {
     selectionTarget(index,kind='letter'){return kind==='hourglass'?{x:(currentLayout?.left||0)+180,y:(currentLayout?.top||0)+65}:{x:(currentLayout?.left||0)+109+Math.min(index||0,7)*21,y:(currentLayout?.height||640)-(currentLayout?.bottom||0)-59};},
     press(action,now){lastPress=action;pressUntil=now+120;},
     celebrate,
-    reset(){clearGoldCelebration();for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();clearScoreFlights();recharge.visible=false;},
+    reset(){clearGoldCelebration();for(const item of celebrations)removeCelebration(item);celebrations.length=0;meters.reset();timerPresentation.reset();overtimeNotice.visible=false;timerAssembly.scale.setScalar(1);clearScoreFlights();recharge.visible=false;},
     animate(now,dt,game){
+      tutorialUI.animate(reducedMotion);
       const activeDt=game.phase==='running'?dt:0;
+      timerPresentation.advance(activeDt);
       if(goldCelebration){goldCelebration.age+=activeDt;if(goldCelebration.age>=1.6)clearGoldCelebration();else animateGoldCelebration();}
       meters.advance(activeDt);scoreSettleAge+=activeDt;
       const arrivals=scoreLedger.advance(activeDt);if(arrivals.length&&!reducedMotion)scoreSettleAge=0;
@@ -615,6 +648,7 @@ export function createUI(font, config, reducedMotion=false) {
       }
     },
     description(game,view){
+      if(view.tutorial){const t=view.tutorial;return `How to Play. Step ${t.stepIndex+1} of ${t.stepCount}. ${t.title}. ${t.detail} ${t.expectedLetter?`Highlighted letter: ${t.expectedLetter}. `:''}Current word: ${game.current||'empty'}. ${t.canContinue?'Ready to play.':''} Practice score: ${game.score}.`; }
       if(mode==='paused')return 'Paused. Your letters and timers are saved. Keep Playing when you are ready.';
       if(mode==='over')return `Round complete. ${compliment(game.wordCount)} ${game.score} points from ${game.wordCount} ${game.wordCount===1?'word':'words'}. Your words: ${game.words.join(', ')||'none yet'}. ${(view.roundSummary?.newWords||[]).length} new ${(view.roundSummary?.newWords||[]).length===1?'discovery':'discoveries'}. Play Again, Word Book, and Your Progress are available.`;
       if(mode==='settings')return `Settings. ${Object.entries(view.settings||{}).map(([key,value])=>`${key} ${value?'on':'off'}`).join('. ')}. Settings are saved on this device when local storage is available.`;
@@ -626,7 +660,7 @@ export function createUI(font, config, reducedMotion=false) {
       if(mode==='help')return `How to Play. Tap letters in order and submit ${config.rules.minWordLength} or more letters. ${letterTimingCopy} When the letter bar expires, a valid word submits automatically. Repeated words earn 0 points with no time penalty. New words add time. ${timeRewardCopy} A blank ? resolves when you submit and scores zero. Pausing freezes both timers. Gold tiles first appear after ${config.specialTiles.goldUnlockWords} words and double the word score. Ice tiles first appear after ${config.specialTiles.iceUnlockWords} scored words and slow time for ${fmt(config.hourglass.durationSeconds)} seconds. Magenta smoke tiles appear after ${config.specialTiles.smokeUnlockWords} words and pulse when ready to burst. Fire tiles appear after ${config.specialTiles.fireUnlockWords} words and make falling letters, rotation and arrivals ${fmt(config.fire.worldTimeScale)} times faster for ${fmt(config.fire.durationSeconds)} seconds. Both timers keep their normal pace during fire. Only one timed effect can run at once. Each round resets these milestones. ${config.difficulty.enabled?`Letter Y spin starts at zero, ramps up over ${fmt(config.difficulty.rampSeconds)} active seconds, then smoothly rises and falls randomly within its speed limits.`:'Letter Y spin stays at zero.'} Clear costs ${fmt(config.penalties.clearWordSeconds)} seconds; invalid words cost ${fmt(config.penalties.invalidWordSeconds)} seconds.`;
       if(mode==='collection')return `Collected words, page ${collectionPage+1} of ${collectionPages}: ${[...game.words].reverse().slice(collectionPage*8,collectionPage*8+8).join(', ')}.`;
       const latest=celebrations.at(-1),reward=latest?` ${latest.result.word}: +${latest.result.points} points. ${latest.result.reward>0?`+${fmt(latest.result.reward)} seconds.`:'Maximum time.'}`:'';
-      return phase==='ready'?'CLTTR. Catch letters. Discover your next word.':`Score ${game.score}.${game.remaining>config.timer.maxSeconds?` Overtime ${Math.ceil(game.remaining/config.timer.maxSeconds*100)}%.`:''} Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindowSeconds)} seconds.`:''}${reward} ${view.feedback}${goldCelebration?' Double Score! This word earned twice the points.':''}`;
+      return phase==='ready'?'CLTTR. Catch letters. Discover your next word.':`Score ${game.score}.${timerPresentation.pose(true).labelVisible?' Overtime!':''} Current word: ${game.current||'empty'}.${game.current?` Next letter or automatic submission in ${game.secondsUntilWordTimeout.toFixed(1)} seconds. Letter window ${fmt(game.letterWindowSeconds)} seconds.`:''}${reward} ${view.feedback}${goldCelebration?' Double Score! This word earned twice the points.':''}`;
     },
   };
 }

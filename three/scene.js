@@ -194,13 +194,15 @@ export async function createScene(host, config, reducedMotion) {
   resize();
 
   function render(tiles, game, dt, now, hover, view) {
-    const reflectionTime=reducedMotion?0:game.elapsed;
+    const reflectionTime=reducedMotion?0:(view.tutorial?.visualTime??game.elapsed);
     materials.ice.uniforms.time.value=reflectionTime;materials.fire.uniforms.time.value=reflectionTime;materials.gold.uniforms.time.value=reflectionTime;
     const visible = new Set(tiles);
     const gasBlocked=Object.values(game.effects).some(remaining=>remaining>0)||!['running','paused'].includes(game.phase);
     for (const [tile, model] of bodies) if (!visible.has(tile)) removeBody(tile, model);
     for (const tile of tiles) {
       const model = bodies.get(tile) || build(tile);
+      // Practice letters enter from behind the coach card, never its header.
+      model.group.visible=model.halo.visible=!view.tutorial||!tile.tutorialDecorative||tile.y>=layout.top+240;
       const previewFloat = game.phase === 'ready' && !reducedMotion ? Math.sin(now * .0008 + tile.x) * 3 : 0;
       model.group.position.set(tile.x-layout.width/2,layout.height/2-tile.y+previewFloat,0);
       // Render the same Y-only pose used by collisions and pickup-face selection.
@@ -209,7 +211,7 @@ export async function createScene(host, config, reducedMotion) {
       if (tile === hover && game.phase === 'running') model.group.position.z = 1.5;
       model.halo.position.set(tile.x-layout.width/2+7,layout.height/2-tile.y-12+previewFloat,-8);
       const spawnOpacity=tile.bornAt===undefined?1:Math.min(1,Math.max(0,(game.elapsed-tile.bornAt)/config.falling.replacementFadeSeconds));
-      const pulse=LetterfallEffects.gasPulse(game.elapsed,model.pulsePhase,{blocked:gasBlocked,reducedMotion});
+      const pulse=LetterfallEffects.gasPulse(reflectionTime,model.pulsePhase,{blocked:gasBlocked,reducedMotion});
       if(model.pulseMaterial){
         model.pulseMaterial.uniforms.pulse.value=pulse;
         model.aura.position.copy(model.group.position);model.aura.position.z=-4;

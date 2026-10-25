@@ -32,7 +32,7 @@ test('playfield copies share climate state while their fades remain independent 
   assert.deepEqual(fading.uniforms.thermalAmount.value.toArray(),[.5,1,.92,0]);
   assert.equal(selection.uniforms.thermalTint.value,cold.uniforms.tint.value);
   updateThermalUniforms(shared,{material:hot,wave:{progress:.3,opacity:.75}});
-  assert.deepEqual(fading.uniforms.thermalAmount.value.toArray(),[.3,.75,.86,1]);
+  assert.deepEqual(fading.uniforms.thermalAmount.value.toArray(),[.3,.75,.91,1]);
   assert.equal(selection.uniforms.thermalTint.value,hot.uniforms.tint.value);
   updateThermalUniforms(shared,null);assert.equal(selection.uniforms.thermalAmount.value.y,0);
   assert.equal(fading.uniforms.opacity.value,.4,'ending the climate effect leaves spawn fade state alone');

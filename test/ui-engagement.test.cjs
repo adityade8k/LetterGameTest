@@ -276,7 +276,7 @@ test('the round clock has its own prominent rail below controls and fire leaves 
   const find=key=>{let found;ui.scene.traverse(o=>{if(o.userData[key])found=o;});return found;};
   const timer=find('roundTimeBar'),track=find('roundTimeTrack');assert.ok(timer&&track);
   ui.scene.updateMatrixWorld(true);const timerBox=new THREE.Box3().setFromObject(timer),trackBox=new THREE.Box3().setFromObject(track);
-  assert.ok(timerBox.max.y-timerBox.min.y>=8,'the round fill is readable at phone size');
+  assert.ok(timerBox.max.y-timerBox.min.y>=10,'the round fill is more prominent at phone size');
   for(const id of ['pause']){
     let control;ui.scene.traverse(o=>{if(o.userData.control?.id===id)control=o.userData.control;});
     const bounds=new THREE.Box3().setFromObject(control.face);
@@ -288,18 +288,22 @@ test('the round clock has its own prominent rail below controls and fire leaves 
   game.effects.hourglass=0;game.remaining=10;sync();assert.notEqual(timer.material,ordinaryMaterial,'low time remains prominent');
 });
 
-test('overtime has a separate gold excess meter and its label clears the reward and controls',supported,async()=>{
+test('overtime has a gold excess meter and a single brief label without a percentage',supported,async()=>{
   const {ui,game,view,sync,THREE}=await create();game.start(0);sync();
   const find=key=>{let found;ui.scene.traverse(o=>{if(o.userData[key])found=o;});return found;};
   const timer=find('roundTimeBar'),overtime=find('overtimeBar');
   assert.equal(overtime.visible,false);assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME/);
   game.remaining=75;sync();assert.equal(timer.scale.x,1);assert.equal(overtime.visible,true);assert.equal(overtime.scale.x,.5);
-  assert.match(visibleText(ui).join(' '),/OVERTIME 125%/);assert.match(ui.description(game,view),/Overtime 125%/);
+  assert.match(visibleText(ui).join(' '),/OVERTIME/);assert.match(ui.description(game,view),/Overtime!/);
+  assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME\s+\d|%/);
   game.remaining=90;ui.celebrate({type:'word',word:'ELEPHANT',points:20,reward:15},game);sync();ui.animate(100,.1,game);
-  assert.equal(overtime.scale.x,1);assert.match(visibleText(ui).join(' '),/OVERTIME 150%/);
+  assert.equal(overtime.scale.x,1);assert.match(visibleText(ui).join(' '),/OVERTIME/);
   ui.scene.updateMatrixWorld(true);const badge=new THREE.Box3().setFromObject(find('overtimeLabel')),reward=new THREE.Box3().setFromObject(find('timeReward'));
   assert.ok(reward.max.y<badge.min.y-3,'the refill reward stays below the overtime label');
   assert.ok(badge.min.x>-30&&badge.max.x<117,'overtime fits between score and pause');
+  ui.animate(1700,1.6,game);sync();assert.equal(overtime.visible,true);
+  assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME/);
+  assert.doesNotMatch(ui.description(game,view),/Overtime/);
   game.remaining=60;sync();assert.equal(overtime.visible,false);assert.doesNotMatch(visibleText(ui).join(' '),/OVERTIME/);
   assert.equal(timer.scale.x,1);game.remaining=30;sync();assert.equal(timer.scale.x,.5);
 });
@@ -308,7 +312,21 @@ test('normal and overtime meter capacities follow configuration rather than the 
   const {ui,game,sync}=await create({timer:{startSeconds:40,maxSeconds:80,overtimeMultiplier:1.5}});game.start(0);sync();
   let timer,overtime;ui.scene.traverse(o=>{if(o.userData.roundTimeBar)timer=o;if(o.userData.overtimeBar)overtime=o;});
   assert.equal(timer.scale.x,.5);game.remaining=100;sync();assert.equal(timer.scale.x,1);assert.equal(overtime.scale.x,.5);
-  assert.match(visibleText(ui).join(' '),/OVERTIME 125%/);
+  assert.match(visibleText(ui).join(' '),/OVERTIME/);assert.doesNotMatch(visibleText(ui).join(' '),/%/);
+});
+
+test('clock milestones animate once, freeze during pause and stay still with reduced motion',supported,async()=>{
+  const {ui,game,sync}=await create();ui.setReducedMotion(false);game.start(0);sync();
+  let assembly,timer;ui.scene.traverse(o=>{if(o.userData.roundTimeAssembly)assembly=o;if(o.userData.roundTimeBar)timer=o;});
+  const highMaterial=timer.material;game.remaining=30;sync();assert.equal(assembly.userData.timerCue,'half');
+  assert.equal(assembly.userData.timerStage,'middle');assert.notEqual(timer.material,highMaterial);
+  const middleMaterial=timer.material;ui.animate(200,.2,game);const pulse=assembly.scale.clone();assert.ok(pulse.y>1);
+  game.phase='paused';sync();ui.animate(1200,1,game);assert.deepEqual(assembly.scale,pulse);
+  game.phase='running';game.remaining=15;sync();assert.equal(assembly.userData.timerCue,'quarter');assert.notEqual(timer.material,middleMaterial);
+  ui.animate(1300,.1,game);assert.ok(assembly.scale.y>1);
+  ui.setReducedMotion(true);sync();assert.equal(assembly.scale.x,1);assert.equal(assembly.scale.y,1);
+  ui.animate(2300,1,game);assert.equal(assembly.userData.timerCue,'');
+  ui.reset();game.remaining=60;sync();assert.equal(assembly.userData.timerCue,'');
 });
 
 
@@ -339,4 +357,43 @@ test('deferred frame sync updates the clock once in animate while direct sync re
   game.remaining=30;ui.sync(game,view,true);assert.equal(timer.scale.x,full);
   ui.animate(100,.016,game);assert.equal(timer.scale.x,.5);
   game.remaining=15;sync();assert.equal(timer.scale.x,.25);
+});
+
+test('practice exposes only its guided action and its coach card blocks underlying tiles',supported,async()=>{
+  const {ui,game,view,sync,hit}=await create();game.start(0);game.select('C',0);
+  const {viewportLayout}=await import('../three/layout.mjs');ui.resize(viewportLayout(360,640));
+  view.tutorial={id:'tap',title:'Tap to create words',detail:'Tap the highlighted letter.',target:'tile',expectedLetter:'A',stepIndex:0,stepCount:7,completed:false,canContinue:false,visualTime:0,highlightRect:{x:150,y:330,w:60,h:60}};sync();
+  assert.deepEqual(ui.buttons().map(c=>c.id),['tutorial-exit']);
+  assert.equal(hit(315,596),null,'submit cannot bypass a guided selection');
+  assert.equal(ui.obscures(180,200),true,'card prevents accidental catches through its surface');
+  assert.equal(ui.obscures(180,360),false,'highlighted tile remains reachable');
+  assert.match(ui.description(game,view),/Step 1 of 7.*Highlighted letter: A/);
+  view.tutorial={...view.tutorial,id:'submit',title:'Submit when ready',target:'submit',highlightRect:{x:76,y:554,w:262,h:54}};sync();
+  assert.deepEqual(ui.buttons().map(c=>c.id),['submit','tutorial-exit']);
+  assert.equal(hit(315,596),'submit');assert.equal(hit(45,580),null);
+  view.tutorial=null;sync();assert.deepEqual(ui.buttons().map(c=>c.id),['pause','submit','undo']);
+  assert.equal(ui.obscures(180,200),false);
+});
+
+test('practice completion advances without Next controls and only its final step offers play',supported,async()=>{
+  const {ui,game,view,sync,hit}=await create();game.start(0);
+  view.tutorial={id:'tap',title:'Tap to create words',detail:'You made CAT!',target:'',stepIndex:0,stepCount:7,completed:true,canContinue:false,visualTime:2};sync();
+  assert.deepEqual(ui.buttons().map(c=>c.id),['tutorial-exit']);
+  assert.doesNotMatch(visibleText(ui).join(' '),/Next|Follow the glow/);
+  view.tutorial={...view.tutorial,id:'ready',title:'Get the highest score!',detail:'You are ready.',stepIndex:6,canContinue:true,nextLabel:'Let’s Play'};sync();
+  assert.deepEqual(ui.buttons().map(c=>c.id),['tutorial-exit','tutorial-next']);
+  assert.equal(hit(180,245),'tutorial-next');
+  assert.match(visibleText(ui).join(' '),/Let’s Play/);
+});
+
+test('desktop keyboard hints use the platform labels and disappear entirely on phones',supported,async()=>{
+  const {ui,game,view,sync,THREE}=await create();game.start(0);view.keyboardHints={submit:'Return',clear:'Delete'};sync();
+  assert.match(visibleText(ui).join(' '),/Delete Return/);
+  let hints;ui.scene.traverse(o=>{if(o.userData.keyboardHints)hints=o;});assert.ok(hints);
+  ui.scene.updateMatrixWorld(true);const bounds=new THREE.Box3().setFromObject(hints);
+  assert.ok(bounds.min.y>=-320&&bounds.max.y<-300,'key hints fit below the tray inside the canvas');
+  assert.deepEqual(ui.buttons().map(c=>c.id),['pause'],'keycaps do not add misleading hit targets');
+  view.keyboardHints={submit:'Enter',clear:'Backspace'};sync();assert.match(visibleText(ui).join(' '),/Backspace Enter/);
+  assert.doesNotMatch(visibleText(ui).join(' '),/Return|Delete/);
+  view.keyboardHints=null;sync();assert.doesNotMatch(visibleText(ui).join(' '),/Return|Delete|Enter|Backspace/);
 });
