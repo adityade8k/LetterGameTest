@@ -95,6 +95,7 @@ test('only one special appears at a time and its full effect and release beat pr
     assert.equal(expected.effect,effect);assert.equal(session.state.targetTileId,expected.id);
     assert.deepEqual(session.pick(ordinary),[]);
     const [result]=session.pick(expected);assert.equal(result.tileEffect.effect,effect);assert.equal(session.game.activeEffect,effect);
+    near(result.tileEffect.duration,createConfig()[effect].durationSeconds*.6);
     assert.equal(session.state.previewActive,true);assert.deepEqual(session.pick(ordinary),[]);
     assert.deepEqual(session.act('tutorial-next'),[]);session.advance(1.5);
     assert.equal(session.state.completed,true);assert.equal(session.state.canContinue,false);assert.equal(session.state.id,id);
@@ -187,6 +188,10 @@ test('practice state never leaks into live rounds or a fresh tutorial',async()=>
   const config=createConfig(),before=JSON.stringify(config),live=new WordGame(['DOG'],config);
   live.start(0);live.select('D',0);const remaining=live.remaining;
   const session=await make(config);toEffects(session);activate(session);session.advance(1000);
+  for(const effect of ['hourglass','fire','smoke']) {
+    near(session.game.config[effect].durationSeconds,config[effect].durationSeconds*.6);
+    assert.equal(live.config[effect].durationSeconds,config[effect].durationSeconds);
+  }
   assert.equal(live.current,'D');assert.equal(live.remaining,remaining);assert.equal(live.wordCount,0);assert.equal(live.score,0);
   assert.equal(live.activeEffect,null);assert.equal(JSON.stringify(config),before);assert.notEqual(session.game,live);
   const fresh=await make(config);assert.equal(fresh.state.id,'tap');assert.equal(fresh.game.score,0);

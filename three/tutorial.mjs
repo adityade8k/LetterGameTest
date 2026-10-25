@@ -13,6 +13,7 @@ const STEPS = [
   { id:'ready', segment:6, title:'Get the highest score!', detail:'You’re ready! Find new words, chase longer ones, and make every letter count.', target:'score' },
 ];
 const PREVIEW_SECONDS = 1.5;
+const EFFECT_DURATION_SCALE = .6;
 const TIMER_DEMO_SECONDS = 3;
 const PRACTICE_WORDS = ['CAT','PLANET','GEM'];
 const STREAM_LETTERS = 'AEIOURSTLNCD';
@@ -20,6 +21,9 @@ const STREAM_LETTERS = 'AEIOURSTLNCD';
 export class TutorialSession {
   constructor(WordGame, config = {}) {
     this.game = new WordGame(PRACTICE_WORDS,config,()=>.5);
+    // WordGame owns a copied config: shorten practice without retuning live play.
+    for(const effect of ['hourglass','fire','smoke'])this.game.config[effect].durationSeconds *= EFFECT_DURATION_SCALE;
+    for(const timing of ['fadeInSeconds','fadeOutSeconds','enterSeconds','exitSeconds'])this.game.config.smoke[timing] *= EFFECT_DURATION_SCALE;
     this.game.start(0);
     this.now = 0;
     this.visualTime = 0;
@@ -203,7 +207,7 @@ export class TutorialSession {
       }
     } else if(this.previewStarted) {
       const activeSeconds = Math.min(dt,this.game.effects[this.step.effect]);
-      // Demonstrate the real effect lifetime without charging time or expiring
+      // Demonstrate the shorter practice lifetime without charging time or expiring
       // the selected practice letter while the player reads the instructions.
       const remaining = this.game.remaining, letterSeconds = this.game.letterSeconds;
       // A custom short round must not end inside a visual-only demonstration.

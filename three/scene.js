@@ -253,9 +253,10 @@ export async function createScene(host, config, reducedMotion) {
         if(material.uniforms.time)material.uniforms.time.value=reflectionTime;
       }
     }
-    const age = config.smoke.durationSeconds - game.effects.smoke;
+    const smokeSettings = game.config.smoke;
+    const age = smokeSettings.durationSeconds - game.effects.smoke;
     for (const cloud of clouds) {
-      const patch=cloud.userData.patch,pose=LetterfallEffects.smokePose(patch,age,game.effects.smoke,layout.width,layout.height,config.smoke,reducedMotion);
+      const patch=cloud.userData.patch,pose=LetterfallEffects.smokePose(patch,age,game.effects.smoke,layout.width,layout.height,smokeSettings,reducedMotion);
       cloud.visible=game.effects.smoke>0;
       cloud.material.uniforms.opacity.value=pose.opacity;
       cloud.material.uniforms.time.value=reducedMotion?0:pose.localAge;
